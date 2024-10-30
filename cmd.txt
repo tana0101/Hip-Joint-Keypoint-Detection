@@ -1,4 +1,4 @@
-python3 train.py --data_dir data --model_name efficientnet --epochs 100 --learning_rate 0.01 --batch_size 32
+python3 train.py --data_dir data --model_name efficientnet --epochs 300 --learning_rate 0.01 --batch_size 32
 python3 predict.py --model_name "efficientnet" --model_path "models/efficientnet_keypoint_300_0.01_32.pth" --data "data/test" --output_dir "results" 
 
 resnet
