@@ -172,7 +172,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=90)
+    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
     # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
     #                                annotation_dir=os.path.join(data_dir, 'val/annotations'), 
     #                                transform=transform)
