@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, transforms
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, ConcatDataset
 from PIL import Image
 import pandas as pd
 import numpy as np
@@ -46,6 +46,49 @@ class KeypointDataset(Dataset):
             keypoints = [coord * scale_x if i % 2 == 0 else coord * scale_y for i, coord in enumerate(keypoints)]
 
         return image, torch.tensor(keypoints, dtype=torch.float32)
+
+class AugmentedKeypointDataset(Dataset):
+    def __init__(self, original_dataset, angle):
+        self.original_dataset = original_dataset
+        self.angle = angle
+
+    def __len__(self):
+        return len(self.original_dataset)
+
+    def __getitem__(self, idx):
+        image, keypoints = self.original_dataset[idx]
+
+        # Apply rotation augmentation
+        rotated_image = transforms.functional.rotate(image, self.angle)
+
+        # Calculate rotation matrix for keypoints
+        angle_rad = np.deg2rad(self.angle)
+        cos_theta = np.cos(angle_rad)
+        sin_theta = np.sin(angle_rad)
+
+        # Center of rotation (image center)
+        original_width, original_height = IMAGE_SIZE, IMAGE_SIZE
+        center_x, center_y = original_width / 2, original_height / 2
+
+        # Apply rotation to keypoints
+        keypoints_rotated = []
+        for i in range(0, len(keypoints), 2):
+            x = keypoints[i]
+            y = keypoints[i + 1]
+            x_new = cos_theta * (x - center_x) - sin_theta * (y - center_y) + center_x
+            y_new = sin_theta * (x - center_x) + cos_theta * (y - center_y) + center_y
+            keypoints_rotated.extend([x_new, y_new])
+
+        # Resize image to target size and adjust keypoints accordingly
+        new_width, new_height = IMAGE_SIZE, IMAGE_SIZE  # Target model input size
+        scale_x = new_width / original_width
+        scale_y = new_height / original_height
+        rotated_image = transforms.Resize((new_height, new_width))(rotated_image)
+
+        # Adjust keypoints for resized image
+        keypoints_resized = [coord * scale_x if i % 2 == 0 else coord * scale_y for i, coord in enumerate(keypoints_rotated)]
+
+        return rotated_image, torch.tensor(keypoints_resized, dtype=torch.float32)
 
 # Initialize model
 def initialize_model(model_name):
@@ -99,6 +142,23 @@ def calculate_pixel_error(preds, targets, img_size):
     pixel_error_per_sample = np.mean(pixel_distances, axis=1)  
     return np.mean(pixel_error_per_sample)  
 
+def display_image(dataset):
+    # Get the first image and keypoints
+    image, keypoints = dataset[0]
+    
+    # Convert the image to a NumPy array
+    image_np = image.permute(1, 2, 0).numpy()
+
+    plt.imshow(image_np, cmap='gray')
+    plt.title("Augmented Image with Keypoints")
+    
+    # Plot the keypoints
+    for i in range(0, len(keypoints), 2):
+        x = keypoints[i].item()  
+        y = keypoints[i + 1].item()  
+        plt.scatter(x, y, c='red', s=20) 
+    
+    plt.show()
 
 def main(data_dir, model_name, epochs, learning_rate, batch_size):
     # Transform for data augmentation and normalization
@@ -112,11 +172,19 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
+    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
     # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
     #                                annotation_dir=os.path.join(data_dir, 'val/annotations'), 
     #                                transform=transform)
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    
+    # To visualize the dataset
+    display_image(train_dataset)
+    display_image(augmented_dataset)
+    
+    # Combine the original and augmented datasets
+    combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
+    
+    train_loader = DataLoader(combined_train_dataset, batch_size=batch_size, shuffle=True)
     # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Initialize the model, loss function, and optimizer
