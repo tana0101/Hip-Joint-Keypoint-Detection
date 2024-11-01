@@ -48,9 +48,11 @@ class KeypointDataset(Dataset):
         return image, torch.tensor(keypoints, dtype=torch.float32)
 
 class AugmentedKeypointDataset(Dataset):
-    def __init__(self, original_dataset, angle):
+    def __init__(self, original_dataset, angle, translate_x=0, translate_y=0):
         self.original_dataset = original_dataset
         self.angle = angle
+        self.translate_x = translate_x
+        self.translate_y = translate_y
 
     def __len__(self):
         return len(self.original_dataset)
@@ -79,7 +81,18 @@ class AugmentedKeypointDataset(Dataset):
             y_new = sin_theta * (x - center_x) + cos_theta * (y - center_y) + center_y
             keypoints_rotated.extend([x_new, y_new])
 
-        return rotated_image, torch.tensor(keypoints_rotated, dtype=torch.float32)
+        # Apply translation to keypoints
+        keypoints_translated = [
+            coord + self.translate_x if i % 2 == 0 else coord + self.translate_y
+            for i, coord in enumerate(keypoints_rotated)
+        ]
+
+        # Apply translation to the image
+        translated_image = transforms.functional.affine(
+            rotated_image, angle=0, translate=(self.translate_x, self.translate_y), scale=1, shear=0
+        )
+
+        return translated_image, torch.tensor(keypoints_translated, dtype=torch.float32)
 
 # Initialize model
 def initialize_model(model_name):
