@@ -67,7 +67,7 @@ class AugmentedKeypointDataset(Dataset):
         sin_theta = np.sin(angle_rad)
 
         # Center of rotation (image center)
-        original_width, original_height = IMAGE_SIZE, IMAGE_SIZE
+        original_width, original_height = image.shape[1], image.shape[2]
         center_x, center_y = original_width / 2, original_height / 2
 
         # Apply rotation to keypoints
@@ -79,16 +79,7 @@ class AugmentedKeypointDataset(Dataset):
             y_new = sin_theta * (x - center_x) + cos_theta * (y - center_y) + center_y
             keypoints_rotated.extend([x_new, y_new])
 
-        # Resize image to target size and adjust keypoints accordingly
-        new_width, new_height = IMAGE_SIZE, IMAGE_SIZE  # Target model input size
-        scale_x = new_width / original_width
-        scale_y = new_height / original_height
-        rotated_image = transforms.Resize((new_height, new_width))(rotated_image)
-
-        # Adjust keypoints for resized image
-        keypoints_resized = [coord * scale_x if i % 2 == 0 else coord * scale_y for i, coord in enumerate(keypoints_rotated)]
-
-        return rotated_image, torch.tensor(keypoints_resized, dtype=torch.float32)
+        return rotated_image, torch.tensor(keypoints_rotated, dtype=torch.float32)
 
 # Initialize model
 def initialize_model(model_name):
