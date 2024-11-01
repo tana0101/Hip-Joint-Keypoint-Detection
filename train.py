@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-IMAGE_SIZE = 224  # Image size for the model
+IMAGE_SIZE = 224 # Image size for the model
 
 # Custom dataset class
 class KeypointDataset(Dataset):
@@ -62,7 +62,7 @@ class AugmentedKeypointDataset(Dataset):
         rotated_image = transforms.functional.rotate(image, self.angle)
 
         # Calculate rotation matrix for keypoints
-        angle_rad = np.deg2rad(self.angle)
+        angle_rad = np.deg2rad(-self.angle)
         cos_theta = np.cos(angle_rad)
         sin_theta = np.sin(angle_rad)
 
@@ -150,7 +150,7 @@ def display_image(dataset):
     image_np = image.permute(1, 2, 0).numpy()
 
     plt.imshow(image_np, cmap='gray')
-    plt.title("Augmented Image with Keypoints")
+    plt.title("Image with Keypoints")
     
     # Plot the keypoints
     for i in range(0, len(keypoints), 2):
@@ -172,7 +172,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
+    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=90)
     # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
     #                                annotation_dir=os.path.join(data_dir, 'val/annotations'), 
     #                                transform=transform)
