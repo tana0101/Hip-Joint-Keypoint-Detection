@@ -48,7 +48,7 @@ class KeypointDataset(Dataset):
         return image, torch.tensor(keypoints, dtype=torch.float32)
 
 class AugmentedKeypointDataset(Dataset):
-    def __init__(self, original_dataset, angle, translate_x=0, translate_y=0):
+    def __init__(self, original_dataset, angle=0, translate_x=0, translate_y=0):
         self.original_dataset = original_dataset
         self.angle = angle
         self.translate_x = translate_x
