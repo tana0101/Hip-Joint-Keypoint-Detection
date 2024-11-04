@@ -156,11 +156,12 @@ def display_image(dataset):
     plt.imshow(image_np, cmap='gray')
     plt.title("Image with Keypoints")
     
-    # Plot the keypoints
+    # Plot the keypoints with numbering
     for i in range(0, len(keypoints), 2):
         x = keypoints[i].item()  
         y = keypoints[i + 1].item()  
-        plt.scatter(x, y, c='red', s=20) 
+        plt.scatter(x, y, c='red', s=20)
+        plt.text(x, y, f'{i//2 + 1}', color='yellow', fontsize=12)  # Add number next to each point
     
     plt.show()
 
