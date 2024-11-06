@@ -165,6 +165,31 @@ def display_image(dataset):
     
     plt.show()
 
+def extend_with_center_points(outputs, keypoints):
+    # Reshape outputs and keypoints for easier indexing
+    outputs = outputs.view(-1, 8, 2)
+    keypoints = keypoints.view(-1, 8, 2)
+
+    # Split outputs and keypoints into two groups (front and back)
+    outputs_front = outputs[:, :4, :]
+    outputs_back = outputs[:, 4:, :]
+    
+    keypoints_front = keypoints[:, :4, :]
+    keypoints_back = keypoints[:, 4:, :]
+
+    # Calculate the center points for both groups
+    center_output_front = torch.mean(outputs_front, dim=1)
+    center_output_back = torch.mean(outputs_back, dim=1)
+
+    center_keypoints_front = torch.mean(keypoints_front, dim=1)
+    center_keypoints_back = torch.mean(keypoints_back, dim=1)
+
+    # Combine the center points with the original outputs and keypoints
+    outputs_extended = torch.cat([outputs, center_output_front.unsqueeze(1), center_output_back.unsqueeze(1)], dim=1)
+    keypoints_extended = torch.cat([keypoints, center_keypoints_front.unsqueeze(1), center_keypoints_back.unsqueeze(1)], dim=1)
+
+    return outputs_extended, keypoints_extended
+
 def main(data_dir, model_name, epochs, learning_rate, batch_size):
     # Transform for data augmentation and normalization
     transform = transforms.Compose([
@@ -225,27 +250,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
             optimizer.zero_grad()
             outputs = model(images)
 
-            # Reshape outputs and keypoints for easier indexing
-            outputs = outputs.view(-1, 8, 2)
-            keypoints = keypoints.view(-1, 8, 2)
-
-            # Split outputs and keypoints into two groups
-            outputs_front = outputs[:, :4, :]
-            outputs_back = outputs[:, 4:, :]
-            
-            keypoints_front = keypoints[:, :4, :]
-            keypoints_back = keypoints[:, 4:, :]
-
-            # Calculate the center points for both groups
-            center_output_front = torch.mean(outputs_front, dim=1)
-            center_output_back = torch.mean(outputs_back, dim=1)
-
-            center_keypoints_front = torch.mean(keypoints_front, dim=1)
-            center_keypoints_back = torch.mean(keypoints_back, dim=1)
-
             # Combine the center points with the original outputs and keypoints
-            outputs_extended = torch.cat([outputs, center_output_front.unsqueeze(1), center_output_back.unsqueeze(1)], dim=1)
-            keypoints_extended = torch.cat([keypoints, center_keypoints_front.unsqueeze(1), center_keypoints_back.unsqueeze(1)], dim=1)
+            outputs_extended, keypoints_extended = extend_with_center_points(outputs, keypoints)
 
             # Calculate loss using the extended tensors
             loss = criterion(outputs_extended, keypoints_extended)
