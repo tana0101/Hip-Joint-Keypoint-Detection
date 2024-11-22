@@ -60,7 +60,8 @@ class AugmentedKeypointDataset(Dataset):
         return len(self.original_dataset)
 
     def __getitem__(self, idx):
-        image, keypoints = self.original_dataset[idx]
+        image, keypoints, original_size = self.original_dataset[idx]
+        original_width, original_height = original_size
 
         # Apply rotation augmentation
         rotated_image = transforms.functional.rotate(image, self.angle)
@@ -71,8 +72,8 @@ class AugmentedKeypointDataset(Dataset):
         sin_theta = np.sin(angle_rad)
 
         # Center of rotation (image center)
-        original_width, original_height = image.shape[1], image.shape[2]
-        center_x, center_y = original_width / 2, original_height / 2
+        img_width, img_height = image.shape[1], image.shape[2]
+        center_x, center_y = img_width / 2, img_height / 2
 
         # Apply rotation to keypoints
         keypoints_rotated = []
@@ -94,7 +95,7 @@ class AugmentedKeypointDataset(Dataset):
             rotated_image, angle=0, translate=(self.translate_x, self.translate_y), scale=1, shear=0
         )
 
-        return translated_image, torch.tensor(keypoints_translated, dtype=torch.float32)
+        return translated_image, torch.tensor(keypoints_translated, dtype=torch.float32), (original_width, original_height)
 
 # Initialize model
 def initialize_model(model_name):
@@ -183,6 +184,8 @@ def calculate_pixel_error(preds, targets, img_size):
 def display_image(dataset):
     # Get the first image and keypoints
     image, keypoints, original_size = dataset[0]
+    print("original_size:", original_size)
+    print("image shape:", image.shape)
     
     # Convert the image to a NumPy array
     image_np = image.permute(1, 2, 0).numpy()
@@ -236,19 +239,19 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
-    # augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
+    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
     # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
     #                                annotation_dir=os.path.join(data_dir, 'val/annotations'), 
     #                                transform=transform)
     
     # To visualize the dataset
     display_image(train_dataset)
-    # display_image(augmented_dataset)
+    display_image(augmented_dataset)
     
     # Combine the original and augmented datasets
-    # combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
+    combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(combined_train_dataset, batch_size=batch_size, shuffle=True)
     # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Initialize the model, loss function, and optimizer
