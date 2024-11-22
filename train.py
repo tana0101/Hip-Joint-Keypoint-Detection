@@ -45,7 +45,7 @@ class KeypointDataset(Dataset):
             # Scale the keypoints
             keypoints = [coord * scale_x if i % 2 == 0 else coord * scale_y for i, coord in enumerate(keypoints)]
 
-        return image, torch.tensor(keypoints, dtype=torch.float32)
+        return image, torch.tensor(keypoints, dtype=torch.float32), (original_width, original_height)
 
 class AugmentedKeypointDataset(Dataset):
     def __init__(self, original_dataset, angle=0, translate_x=0, translate_y=0):
@@ -119,36 +119,68 @@ def initialize_model(model_name):
     return model
 
 def calculate_nme(preds, targets, img_size):
-    
-    preds = preds.reshape(-1, 8, 2)
-    targets = targets.reshape(-1, 8, 2)
+    """
+    Calculate the Normalized Mean Error (NME) for a single sample.
 
-    pixel_distances = np.linalg.norm(preds - targets, axis=2)
-    img_diag = np.sqrt(img_size[0]**2 + img_size[1]**2) # image diagonal
-    norm_distances = pixel_distances / img_diag  # normalize by image diagonal
-    nme_per_sample = np.mean(norm_distances, axis=1)  # mean NME for each sample
+    Args:
+        preds: Model predictions, shape (8, 2), representing the (x, y) coordinates of 8 keypoints.
+        targets: Ground truth values, shape (8, 2).
+        img_size: Original image size as a tuple (original_width, original_height).
 
-    return np.mean(nme_per_sample)  # mean NME for all samples
+    Returns:
+        numpy.ndarray: The normalized distances for each keypoint.
+    """
+    preds = preds.reshape(8, 2)  # Reshape to (8, 2)
+    targets = targets.reshape(8, 2)  # Reshape to (8, 2)
+
+    # Calculate the Euclidean distance for each keypoint
+    pixel_distances = np.linalg.norm(preds - targets, axis=1)  # Shape: (8,)
+
+    # Calculate the diagonal of the image
+    img_diag = np.sqrt(img_size[0]**2 + img_size[1]**2)  # Scalar
+
+    # Normalize distances by the image diagonal
+    norm_distances = pixel_distances / img_diag  # Shape: (8,)
+
+    # Return the mean of the normalized distances
+    return np.mean(norm_distances)
+
 
 def calculate_pixel_error(preds, targets, img_size):
-    
-    preds = preds.reshape(-1, 8, 2)  # Reshape predictions to (batch_size, 8, 2)
-    targets = targets.reshape(-1, 8, 2)  # Reshape targets to (batch_size, 8, 2)
+    """
+    Calculate the Pixel Error for a single sample.
 
+    Args:
+        preds: Model predictions, shape (8, 2), representing the (x, y) coordinates of 8 keypoints.
+        targets: Ground truth values, shape (8, 2).
+        img_size: Original image size as a tuple (original_width, original_height).
+
+    Returns:
+        numpy.ndarray: The pixel distances for each keypoint.
+    """
+    preds = preds.reshape(8, 2)  # Reshape to (8, 2)
+    targets = targets.reshape(8, 2)  # Reshape to (8, 2)
+
+    # Unpack the original image dimensions
     original_width, original_height = img_size
-    scale_x = original_width / IMAGE_SIZE
+
+    # Calculate the scaling factors for width and height
+    scale_x = original_width / IMAGE_SIZE  # Assuming IMAGE_SIZE is the model input size
     scale_y = original_height / IMAGE_SIZE
 
-    preds_scaled = preds * np.array([scale_x, scale_y]) 
-    targets_scaled = targets * np.array([scale_x, scale_y]) 
+    # Scale the predictions and targets
+    preds_scaled = preds * np.array([scale_x, scale_y])  # Shape: (8, 2)
+    targets_scaled = targets * np.array([scale_x, scale_y])  # Shape: (8, 2)
 
-    pixel_distances = np.linalg.norm(preds_scaled - targets_scaled, axis=2)  
-    pixel_error_per_sample = np.mean(pixel_distances, axis=1)  
-    return np.mean(pixel_error_per_sample)  
+    # Calculate the Euclidean distance for each keypoint
+    pixel_distances = np.linalg.norm(preds_scaled - targets_scaled, axis=1)  # Shape: (8,)
+
+    # Return the mean of the pixel distances
+    return np.mean(pixel_distances)
 
 def display_image(dataset):
     # Get the first image and keypoints
-    image, keypoints = dataset[0]
+    image, keypoints, original_size = dataset[0]
     
     # Convert the image to a NumPy array
     image_np = image.permute(1, 2, 0).numpy()
@@ -202,19 +234,19 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
+    # augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
     # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
     #                                annotation_dir=os.path.join(data_dir, 'val/annotations'), 
     #                                transform=transform)
     
     # To visualize the dataset
     display_image(train_dataset)
-    display_image(augmented_dataset)
+    # display_image(augmented_dataset)
     
     # Combine the original and augmented datasets
-    combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
+    # combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
     
-    train_loader = DataLoader(combined_train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Initialize the model, loss function, and optimizer
@@ -244,9 +276,9 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         nme_values = []
         pixel_error_values = []
 
-        for images, keypoints in train_loader:
+        for images, keypoints, original_sizes in train_loader:
             images, keypoints = images.to(device), keypoints.to(device)
-
+            
             optimizer.zero_grad()
             outputs = model(images)
 
@@ -263,15 +295,23 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
             preds = outputs.cpu().detach().numpy()
             targets = keypoints.cpu().numpy()
 
-            img_size = (images.shape[2], images.shape[3])
+            # Unpack the original image sizes
+            widths, heights = original_sizes  # original_sizes is a tuple of two tensors
+            widths = widths.cpu().numpy()  
+            heights = heights.cpu().numpy() 
 
-            # NME
-            nme = calculate_nme(preds, targets, img_size)
-            nme_values.append(nme)
+            # Convert the original sizes to a list of tuples
+            original_sizes = [(w, h) for w, h in zip(widths, heights)]
 
-            # Pixel mean distance error
-            pixel_error = calculate_pixel_error(preds, targets, img_size)
-            pixel_error_values.append(pixel_error)
+            # Calculate NME and Pixel Error for each sample
+            for i in range(len(original_sizes)):
+                img_size = original_sizes[i]
+
+                nme = calculate_nme(preds[i], targets[i], img_size)
+                pixel_error = calculate_pixel_error(preds[i], targets[i], img_size)
+
+                nme_values.append(nme)
+                pixel_error_values.append(pixel_error)
 
         epoch_loss = running_loss / len(train_loader)
         epoch_nme = np.mean(nme_values)
