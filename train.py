@@ -11,6 +11,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 IMAGE_SIZE = 224 # Image size for the model
+LOGS_DIR = "logs"
+MODELS_DIR = "models"
 
 # Custom dataset class
 class KeypointDataset(Dataset):
@@ -323,6 +325,10 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
 
         print(f"Epoch [{epoch + 1}/{epochs}], Loss: {epoch_loss:.4f}, NME: {epoch_nme:.4f}, Pixel Error: {epoch_pixel_error:.4f}")
 
+    # Ensure directories exist
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    os.makedirs(MODELS_DIR, exist_ok=True)
+
     # Plot and save the training progress
     epochs_range = range(1, epochs + 1)
     plt.figure(figsize=(12, 6))
@@ -355,17 +361,25 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig(f"logs/{model_name}_training_plot_{epochs}_{learning_rate}_{batch_size}.png")
+
+    # Save the training plot
+    training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_{epochs}_{learning_rate}_{batch_size}.png"
+    plt.savefig(training_plot_path)
+    print(f"Training plot saved to: {training_plot_path}")
     plt.show()
 
     # Save the Loss, NME, and Pixel Error to a text file
-    with open(f"logs/{model_name}_training_log.txt_{epochs}_{learning_rate}_{batch_size}.txt", "w") as f:
+    training_log_path = f"{LOGS_DIR}/{model_name}_training_log_{epochs}_{learning_rate}_{batch_size}.txt"
+    with open(training_log_path, "w") as f:
         for epoch, (loss, nme, pixel_error) in enumerate(zip(epoch_losses, epoch_nmes, epoch_pixel_errors), 1):
             f.write(f"Epoch {epoch}: Loss = {loss:.4f}, NME = {nme:.4f}, Pixel Error = {pixel_error:.4f}\n")
+    print(f"Training log saved to: {training_log_path}")
 
     # Save the model
-    torch.save(model.state_dict(), f'models/{model_name}_keypoint_{epochs}_{learning_rate}_{batch_size}.pth')
-    print(f"{model_name} model trained and saved successfully!")
+    model_path = f"{MODELS_DIR}/{model_name}_keypoint_{epochs}_{learning_rate}_{batch_size}.pth"
+    torch.save(model.state_dict(), model_path)
+    print(f"{model_name} model trained and saved successfully to: {model_path}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
