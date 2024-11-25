@@ -239,7 +239,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, angle=45)
+    augmented_dataset = AugmentedKeypointDataset(train_dataset, translate_x=20, translate_y=20)
+    augmented_dataset_2 = AugmentedKeypointDataset(train_dataset, angle=10)
     # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
     #                                annotation_dir=os.path.join(data_dir, 'val/annotations'), 
     #                                transform=transform)
@@ -250,6 +251,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     
     # Combine the original and augmented datasets
     combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
+    combined_train_dataset = ConcatDataset([combined_train_dataset, augmented_dataset_2])
+    print(f"Combined Train Dataset: {len(combined_train_dataset)} samples")
     
     train_loader = DataLoader(combined_train_dataset, batch_size=batch_size, shuffle=True)
     # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
