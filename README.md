@@ -14,8 +14,7 @@ In this lab, we will use different models and methods to detect the key points o
 
 The dataset used in the experiment is the X-ray images of the hip joint, which have 83 pictures, and each picture contains the key points of the hip joint.
 
-<img src="data\train\images\19435927-050.jpg" width="250" />
-<img src="data\train\images\19810657-60.jpg" width="280" />
+<img src="data\train\images\19435927-050.jpg" width="250" /><img src="data\train\images\19810657-60.jpg" width="278" />
 
 - 原始資料放置於 `xray_IHDI` 資料夾中
 - 分割後的資料放置於 `data` 資料夾中
@@ -129,8 +128,7 @@ optional arguments:
                         output directory for predictions
 ```
 
-<img src="results\03\original\efficientnet_1000_0.01_32\efficientnet\22108380-010_prediction.png" width="250" />
-<img src="results\03\original\efficientnet_1000_0.01_32\efficientnet_avg_distances.png" width="250" />
+<img src="results\03\original\efficientnet_1000_0.01_32\efficientnet\22108380-010_prediction.png" width="250" /><img src="results\03\original\efficientnet_1000_0.01_32\efficientnet_avg_distances.png" width="250" />
 
 此圖為 EfficientNet 在 1000 epochs 時的預測結果，使用了測試資料集，包含了 **預測圖片** 與 **平均 pixel 距離**。
 
