@@ -14,8 +14,8 @@ In this lab, we will use different models and methods to detect the key points o
 
 The dataset used in the experiment is the X-ray images of the hip joint, which have 83 pictures, and each picture contains the key points of the hip joint.
 
-<img src="data\train\images\19435927-050.jpg" width="350" />
-<img src="data\train\images\19810657-60.jpg" width="390" />
+<img src="data\train\images\19435927-050.jpg" width="250" />
+<img src="data\train\images\19810657-60.jpg" width="280" />
 
 - 原始資料放置於 `xray_IHDI` 資料夾中
 - 分割後的資料放置於 `data` 資料夾中
@@ -129,8 +129,8 @@ optional arguments:
                         output directory for predictions
 ```
 
-<img src="results\03\original\efficientnet_1000_0.01_32\efficientnet\22108380-010_prediction.png" width="400" />
-<img src="results\03\original\efficientnet_1000_0.01_32\efficientnet_avg_distances.png" width="400" />
+<img src="results\03\original\efficientnet_1000_0.01_32\efficientnet\22108380-010_prediction.png" width="250" />
+<img src="results\03\original\efficientnet_1000_0.01_32\efficientnet_avg_distances.png" width="250" />
 
 此圖為 EfficientNet 在 1000 epochs 時的預測結果，使用了測試資料集，包含了 **預測圖片** 與 **平均 pixel 距離**。
 
@@ -144,7 +144,7 @@ This image is the prediction result of EfficientNet at 1000 epochs, using the te
 Using data augmentation and center point loss calculation methods can improve the model's performance.
 
 - 使用 EfficientNet 在 1000 epochs 時，使用 Rotate 10° + Translate 20 加強後的訓練結果：
-    <img src="results\03\angle10+translate_x20_y20\efficientnet_1000_0.01_32\efficientnet\22108380-010_prediction.png" width="400" /><img src="results\03\angle10+translate_x20_y20\efficientnet_1000_0.01_32\efficientnet_avg_distances.png" width="400" />
-    <img src="src/img/result2.png" width="600" />
+    <img src="results\03\angle10+translate_x20_y20\efficientnet_1000_0.01_32\efficientnet\22108380-010_prediction.png" width="250" /><img src="results\03\angle10+translate_x20_y20\efficientnet_1000_0.01_32\efficientnet_avg_distances.png" width="250" />
+    <img src="src/img/result2.png" width="500" />
 使用 Rotate 10° + Translate 20 的資料增強方法，得到最佳的效果。
 The best result is obtained using the Rotate 10° + Translate 20 data augmentation method.
