@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
 MODELS_DIR = "models"
+POINTS_COUNT = 12  # 12 points (x, y) + 2 center points (x, y)
 
 # Custom dataset class
 class KeypointDataset(Dataset):
@@ -104,18 +105,18 @@ def initialize_model(model_name):
         model.classifier = nn.Sequential(
             nn.Linear(model.classifier[1].in_features, 2048),
             nn.ReLU(),
-            nn.Linear(2048, 16)  # 8 points (x, y)
+            nn.Linear(2048, POINTS_COUNT * 2)
         )
     elif model_name == "resnet":
         model = models.resnet50(pretrained=True)
         model.fc = nn.Sequential(
             nn.Linear(model.fc.in_features, 2048),
             nn.ReLU(),
-            nn.Linear(2048, 16)
+            nn.Linear(2048, POINTS_COUNT * 2)
         )
     elif model_name == "vgg":
         model = models.vgg19(pretrained=True)
-        model.classifier[6] = nn.Linear(model.classifier[6].in_features, 16)
+        model.classifier[6] = nn.Linear(model.classifier[6].in_features, POINTS_COUNT * 2)
     else:
         raise ValueError("Model must be 'efficientnet', 'resnet', or 'vgg'.")
     
@@ -126,24 +127,24 @@ def calculate_nme(preds, targets, img_size):
     Calculate the Normalized Mean Error (NME) for a single sample.
 
     Args:
-        preds: Model predictions, shape (8, 2), representing the (x, y) coordinates of 8 keypoints.
-        targets: Ground truth values, shape (8, 2).
+        preds: Model predictions, shape (12, 2), representing the (x, y) coordinates of 12 keypoints.
+        targets: Ground truth values, shape (12, 2).
         img_size: Original image size as a tuple (original_width, original_height).
 
     Returns:
         numpy.ndarray: The normalized distances for each keypoint.
     """
-    preds = preds.reshape(8, 2)  # Reshape to (8, 2)
-    targets = targets.reshape(8, 2)  # Reshape to (8, 2)
+    preds = preds.reshape(POINTS_COUNT, 2)  # Reshape to (12, 2)
+    targets = targets.reshape(POINTS_COUNT, 2)  # Reshape to (12, 2)
 
     # Calculate the Euclidean distance for each keypoint
-    pixel_distances = np.linalg.norm(preds - targets, axis=1)  # Shape: (8,)
+    pixel_distances = np.linalg.norm(preds - targets, axis=1)  # Shape: (12,)
 
     # Calculate the diagonal of the image
     img_diag = np.sqrt(img_size[0]**2 + img_size[1]**2)  # Scalar
 
     # Normalize distances by the image diagonal
-    norm_distances = pixel_distances / img_diag  # Shape: (8,)
+    norm_distances = pixel_distances / img_diag  # Shape: (12,)
 
     # Return the mean of the normalized distances
     return np.mean(norm_distances)
@@ -161,8 +162,8 @@ def calculate_pixel_error(preds, targets, img_size):
     Returns:
         numpy.ndarray: The pixel distances for each keypoint.
     """
-    preds = preds.reshape(8, 2)  # Reshape to (8, 2)
-    targets = targets.reshape(8, 2)  # Reshape to (8, 2)
+    preds = preds.reshape(POINTS_COUNT, 2)  # Reshape to (12, 2)
+    targets = targets.reshape(POINTS_COUNT, 2)  # Reshape to (12, 2)
 
     # Unpack the original image dimensions
     original_width, original_height = img_size
@@ -172,11 +173,11 @@ def calculate_pixel_error(preds, targets, img_size):
     scale_y = original_height / IMAGE_SIZE
 
     # Scale the predictions and targets
-    preds_scaled = preds * np.array([scale_x, scale_y])  # Shape: (8, 2)
-    targets_scaled = targets * np.array([scale_x, scale_y])  # Shape: (8, 2)
+    preds_scaled = preds * np.array([scale_x, scale_y])  # Shape: (12, 2)
+    targets_scaled = targets * np.array([scale_x, scale_y])  # Shape: (12, 2)
 
     # Calculate the Euclidean distance for each keypoint
-    pixel_distances = np.linalg.norm(preds_scaled - targets_scaled, axis=1)  # Shape: (8,)
+    pixel_distances = np.linalg.norm(preds_scaled - targets_scaled, axis=1)  # Shape: (12,)
 
     # Return the mean of the pixel distances
     return np.mean(pixel_distances)
@@ -204,15 +205,16 @@ def display_image(dataset):
 
 def extend_with_center_points(outputs, keypoints):
     # Reshape outputs and keypoints for easier indexing
-    outputs = outputs.view(-1, 8, 2)
-    keypoints = keypoints.view(-1, 8, 2)
+    outputs = outputs.view(-1, POINTS_COUNT, 2)
+    keypoints = keypoints.view(-1, POINTS_COUNT, 2)
 
     # Split outputs and keypoints into two groups (front and back)
-    outputs_front = outputs[:, :4, :]
-    outputs_back = outputs[:, 4:, :]
+    half_count = POINTS_COUNT // 2  
+    outputs_front = outputs[:, :half_count, :]  # 前6點
+    outputs_back = outputs[:, half_count:, :]  # 後6點
     
-    keypoints_front = keypoints[:, :4, :]
-    keypoints_back = keypoints[:, 4:, :]
+    keypoints_front = keypoints[:, :half_count, :]  # 前6點
+    keypoints_back = keypoints[:, half_count:, :]  # 後6點
 
     # Calculate the center points for both groups
     center_output_front = torch.mean(outputs_front, dim=1)
@@ -224,7 +226,7 @@ def extend_with_center_points(outputs, keypoints):
     # Combine the center points with the original outputs and keypoints
     outputs_extended = torch.cat([outputs, center_output_front.unsqueeze(1), center_output_back.unsqueeze(1)], dim=1)
     keypoints_extended = torch.cat([keypoints, center_keypoints_front.unsqueeze(1), center_keypoints_back.unsqueeze(1)], dim=1)
-
+    
     return outputs_extended, keypoints_extended
 
 def main(data_dir, model_name, epochs, learning_rate, batch_size):
@@ -239,22 +241,22 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, translate_x=20, translate_y=20)
-    augmented_dataset_2 = AugmentedKeypointDataset(train_dataset, angle=10)
+    # augmented_dataset = AugmentedKeypointDataset(train_dataset, translate_x=20, translate_y=20)
+    # augmented_dataset_2 = AugmentedKeypointDataset(train_dataset, angle=10)
     # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
-    #                                annotation_dir=os.path.join(data_dir, 'val/annotations'), 
-    #                                transform=transform)
+                                #    annotation_dir=os.path.join(data_dir, 'val/annotations'), 
+                                #    transform=transform)
     
     # To visualize the dataset
     display_image(train_dataset)
-    display_image(augmented_dataset)
+    # display_image(augmented_dataset)
     
     # Combine the original and augmented datasets
-    combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
-    combined_train_dataset = ConcatDataset([combined_train_dataset, augmented_dataset_2])
-    print(f"Combined Train Dataset: {len(combined_train_dataset)} samples")
+    # combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
+    # combined_train_dataset = ConcatDataset([combined_train_dataset, augmented_dataset_2])
+    print(f"Combined Train Dataset: {len(train_dataset)} samples")
     
-    train_loader = DataLoader(combined_train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Initialize the model, loss function, and optimizer
@@ -292,7 +294,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
 
             # Combine the center points with the original outputs and keypoints
             outputs_extended, keypoints_extended = extend_with_center_points(outputs, keypoints)
-
+            
             # Calculate loss using the extended tensors
             loss = criterion(outputs_extended, keypoints_extended)
             loss.backward()

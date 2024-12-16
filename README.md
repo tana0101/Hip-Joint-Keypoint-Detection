@@ -143,6 +143,6 @@ Using data augmentation and center point loss calculation methods can improve th
 
 - 使用 EfficientNet 在 1000 epochs 時，使用 Rotate 10° + Translate 20 加強後的訓練結果：
     <img src="results\03\angle10+translate_x20_y20\efficientnet_1000_0.01_32\efficientnet\22108380-010_prediction.png" width="250" /><img src="results\03\angle10+translate_x20_y20\efficientnet_1000_0.01_32\efficientnet_avg_distances.png" width="250" />
-    <img src="src/img/result2.png" width="500" />
+<img src="src/img/result2.png" width="500" />
 使用 Rotate 10° + Translate 20 的資料增強方法，得到最佳的效果。
 The best result is obtained using the Rotate 10° + Translate 20 data augmentation method.
