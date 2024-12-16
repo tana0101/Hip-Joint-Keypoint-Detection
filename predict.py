@@ -11,6 +11,7 @@ import pandas as pd
 import re
 
 IMAGE_SIZE = 224 # Image size for the model
+POINTS_COUNT = 12
 
 # Initialize model
 def initialize_model(model_name):
@@ -19,14 +20,14 @@ def initialize_model(model_name):
         model.classifier = nn.Sequential(
             nn.Linear(model.classifier[1].in_features, 2048),
             nn.ReLU(),
-            nn.Linear(2048, 16)
+            nn.Linear(2048, POINTS_COUNT * 2)
         )
     elif model_name == "resnet":
         model = models.resnet50(pretrained=True)
         model.fc = nn.Sequential(
             nn.Linear(model.fc.in_features, 2048),
             nn.ReLU(),
-            nn.Linear(2048, 16)
+            nn.Linear(2048, POINTS_COUNT * 2)
         )
     elif model_name == "vgg":
         model = models.vgg19(pretrained=True)
