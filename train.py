@@ -51,7 +51,7 @@ class KeypointDataset(Dataset):
         return image, torch.tensor(keypoints, dtype=torch.float32), (original_width, original_height)
 
 class AugmentedKeypointDataset(Dataset):
-    def __init__(self, original_dataset, max_angle=5, max_translate_x=5, max_translate_y=5):
+    def __init__(self, original_dataset, max_angle=0, max_translate_x=0, max_translate_y=0):
         """
         Args:
             original_dataset: The original dataset to augment.
@@ -318,7 +318,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
                                    annotation_dir=os.path.join(data_dir, 'val/annotations'), 
                                    transform=transform)
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, translate_x=20, translate_y=20)
+    augmented_dataset = AugmentedKeypointDataset(train_dataset, max_translate_x=20, max_translate_y=20)
     combined_dataset = ConcatDataset([train_dataset, augmented_dataset])
     # To visualize the dataset
     display_image(train_dataset, 0)
@@ -328,6 +328,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
+    print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
+    
     # Initialize the model, loss function, and optimizer
     model = initialize_model(model_name)
     criterion = nn.MSELoss()
