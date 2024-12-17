@@ -50,7 +50,7 @@ def calculate_avg_distance(predicted_keypoints, original_keypoints):
 
 def extract_info_from_model_path(model_path):
     # Extract epochs, learning_rate, and batch_size from the model_path
-    match = re.search(r'_(\d+)_(\d+\.\d+)_(\d+)\.pth', model_path)
+    match = re.search(r'_(\d+)_(\d+\.\d+)_(\d+)_best\.pth', model_path)
     if match:
         epochs = int(match.group(1))
         learning_rate = float(match.group(2))
@@ -108,8 +108,8 @@ def predict(model_name, model_path, data_dir, output_dir):
 
             # Save image with predicted keypoints
             plt.imshow(image, cmap='gray')
-            plt.scatter(scaled_keypoints[:, 0], scaled_keypoints[:, 1], c='yellow', marker='o', label='Predicted Keypoints')
-            plt.scatter(original_keypoints[:, 0], original_keypoints[:, 1], c='red', marker='o', label='Original Keypoints')
+            plt.scatter(scaled_keypoints[:, 0], scaled_keypoints[:, 1], c='yellow', marker='o', label='Predicted Keypoints', s=10)
+            plt.scatter(original_keypoints[:, 0], original_keypoints[:, 1], c='red', marker='o', label='Original Keypoints', s=10)
             plt.text(10, original_height - 10, f'Avg Distance: {avg_distance:.2f}', color='red', fontsize=12, ha='left', va='center')
 
             plt.title(f'Predicted Keypoints for {image_file}')
@@ -124,7 +124,7 @@ def predict(model_name, model_path, data_dir, output_dir):
             image_counter += 1  # Increment the image index
 
     # Plot bar chart for avg distances
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(12, 6))
     plt.bar(image_labels, all_avg_distances, color='blue', label='Avg Distance per Image')
 
     # Overall average distance
