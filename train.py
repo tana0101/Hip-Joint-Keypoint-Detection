@@ -51,24 +51,37 @@ class KeypointDataset(Dataset):
         return image, torch.tensor(keypoints, dtype=torch.float32), (original_width, original_height)
 
 class AugmentedKeypointDataset(Dataset):
-    def __init__(self, original_dataset, angle=0, translate_x=0, translate_y=0):
+    def __init__(self, original_dataset, max_angle=5, max_translate_x=5, max_translate_y=5):
+        """
+        Args:
+            original_dataset: The original dataset to augment.
+            max_angle: Maximum rotation angle (degrees) for augmentation.
+            max_translate_x: Maximum horizontal translation (pixels).
+            max_translate_y: Maximum vertical translation (pixels).
+        """
         self.original_dataset = original_dataset
-        self.angle = angle
-        self.translate_x = translate_x
-        self.translate_y = translate_y
+        self.max_angle = max_angle
+        self.max_translate_x = max_translate_x
+        self.max_translate_y = max_translate_y
 
     def __len__(self):
         return len(self.original_dataset)
 
     def __getitem__(self, idx):
+        # Retrieve the original data
         image, keypoints, original_size = self.original_dataset[idx]
         original_width, original_height = original_size
 
+        # Generate random augmentation parameters
+        angle = np.random.uniform(-self.max_angle, self.max_angle)
+        translate_x = np.random.uniform(-self.max_translate_x, self.max_translate_x)
+        translate_y = np.random.uniform(-self.max_translate_y, self.max_translate_y)
+
         # Apply rotation augmentation
-        rotated_image = transforms.functional.rotate(image, self.angle)
+        rotated_image = transforms.functional.rotate(image, angle)
 
         # Calculate rotation matrix for keypoints
-        angle_rad = np.deg2rad(-self.angle)
+        angle_rad = np.deg2rad(-angle)
         cos_theta = np.cos(angle_rad)
         sin_theta = np.sin(angle_rad)
 
@@ -87,13 +100,13 @@ class AugmentedKeypointDataset(Dataset):
 
         # Apply translation to keypoints
         keypoints_translated = [
-            coord + self.translate_x if i % 2 == 0 else coord + self.translate_y
+            coord + translate_x if i % 2 == 0 else coord + translate_y
             for i, coord in enumerate(keypoints_rotated)
         ]
 
         # Apply translation to the image
         translated_image = transforms.functional.affine(
-            rotated_image, angle=0, translate=(self.translate_x, self.translate_y), scale=1, shear=0
+            rotated_image, angle=0, translate=(translate_x, translate_y), scale=1, shear=0
         )
 
         return translated_image, torch.tensor(keypoints_translated, dtype=torch.float32), (original_width, original_height)
@@ -182,17 +195,19 @@ def calculate_pixel_error(preds, targets, img_size):
     # Return the mean of the pixel distances
     return np.mean(pixel_distances)
 
-def display_image(dataset):
-    # Get the first image and keypoints
-    image, keypoints, original_size = dataset[0]
-    print("original_size:", original_size)
-    print("image shape:", image.shape)
+def display_image(dataset, index):
+    # Get the nth image and keypoints
+    image, keypoints, original_size = dataset[index]
+    print(f"Displaying image {index}")
+    print("Original size:", original_size)
+    print("Image shape:", image.shape)
     
     # Convert the image to a NumPy array
     image_np = image.permute(1, 2, 0).numpy()
 
+    # Display the image
     plt.imshow(image_np, cmap='gray')
-    plt.title("Image with Keypoints")
+    plt.title(f"Image {index} with Keypoints")
     
     # Plot the keypoints with numbering
     for i in range(0, len(keypoints), 2):
@@ -200,8 +215,9 @@ def display_image(dataset):
         y = keypoints[i + 1].item()  
         plt.scatter(x, y, c='red', s=20)
         plt.text(x, y, f'{i//2 + 1}', color='yellow', fontsize=12)  # Add number next to each point
-    
+
     plt.show()
+
 
 def extend_with_center_points(outputs, keypoints):
     # Reshape outputs and keypoints for easier indexing
@@ -302,11 +318,14 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
                                    annotation_dir=os.path.join(data_dir, 'val/annotations'), 
                                    transform=transform)
-
+    augmented_dataset = AugmentedKeypointDataset(train_dataset, translate_x=20, translate_y=20)
+    combined_dataset = ConcatDataset([train_dataset, augmented_dataset])
     # To visualize the dataset
-    display_image(train_dataset)
+    display_image(train_dataset, 0)
+    for i in range(0, 3):
+        display_image(augmented_dataset, i)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Initialize the model, loss function, and optimizer
