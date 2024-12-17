@@ -229,6 +229,64 @@ def extend_with_center_points(outputs, keypoints):
     
     return outputs_extended, keypoints_extended
 
+def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors, title_suffix="", start_epoch=1):
+    """
+    Function to plot training and validation progress for Loss, NME, and Pixel Error.
+    Args:
+        epochs_range: Range of epochs to plot
+        epoch_losses: Training losses for each epoch
+        val_losses: Validation losses for each epoch
+        epoch_nmes: Training NME for each epoch
+        val_nmes: Validation NME for each epoch
+        epoch_pixel_errors: Training Pixel Error for each epoch
+        val_pixel_errors: Validation Pixel Error for each epoch
+        title_suffix: Optional suffix for the plot titles (e.g., " (Epoch 20 onwards)")
+        start_epoch: Epoch to start plotting from (default is 1, to plot from the start)
+    """
+    # Extract data from start_epoch
+    if start_epoch > 1:
+        epochs_range = range(start_epoch, len(epoch_losses) + 1)
+        epoch_losses = epoch_losses[start_epoch - 1:]
+        epoch_nmes = epoch_nmes[start_epoch - 1:]
+        epoch_pixel_errors = epoch_pixel_errors[start_epoch - 1:]
+        val_losses = val_losses[start_epoch - 1:]
+        val_nmes = val_nmes[start_epoch - 1:]
+        val_pixel_errors = val_pixel_errors[start_epoch - 1:]
+
+    plt.figure(figsize=(12, 6))
+
+    # Plot Loss with log scale
+    plt.subplot(1, 3, 1)
+    plt.plot(epochs_range, epoch_losses, label="Training Loss")
+    plt.plot(epochs_range, val_losses, label="Validation Loss")
+    plt.title(f"Loss{title_suffix}")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss (log)")
+    plt.yscale('log')  # Log scale
+    plt.legend()
+
+    # Plot NME
+    plt.subplot(1, 3, 2)
+    plt.plot(epochs_range, epoch_nmes, label="Training NME")
+    plt.plot(epochs_range, val_nmes, label="Validation NME")
+    plt.title(f"NME{title_suffix}")
+    plt.xlabel("Epoch")
+    plt.ylabel("NME (log)")
+    plt.yscale('log')  # Log scale
+    plt.legend()
+
+    # Plot Pixel Error
+    plt.subplot(1, 3, 3)
+    plt.plot(epochs_range, epoch_pixel_errors, label="Training Pixel Error")
+    plt.plot(epochs_range, val_pixel_errors, label="Validation Pixel Error")
+    plt.title(f"Pixel Error{title_suffix}")
+    plt.xlabel("Epoch")
+    plt.ylabel("Pixel Error (log)")
+    plt.yscale('log')  # Log scale
+    plt.legend()
+
+    plt.tight_layout()
+
 def main(data_dir, model_name, epochs, learning_rate, batch_size):
     # Transform for data augmentation and normalization
     transform = transforms.Compose([
@@ -241,23 +299,15 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
                                      annotation_dir=os.path.join(data_dir, 'train/annotations'), 
                                      transform=transform)
-    # augmented_dataset = AugmentedKeypointDataset(train_dataset, translate_x=20, translate_y=20)
-    # augmented_dataset_2 = AugmentedKeypointDataset(train_dataset, angle=10)
-    # val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
-                                #    annotation_dir=os.path.join(data_dir, 'val/annotations'), 
-                                #    transform=transform)
-    
+    val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
+                                   annotation_dir=os.path.join(data_dir, 'val/annotations'), 
+                                   transform=transform)
+
     # To visualize the dataset
     display_image(train_dataset)
-    # display_image(augmented_dataset)
-    
-    # Combine the original and augmented datasets
-    # combined_train_dataset = ConcatDataset([train_dataset, augmented_dataset])
-    # combined_train_dataset = ConcatDataset([combined_train_dataset, augmented_dataset_2])
-    print(f"Combined Train Dataset: {len(train_dataset)} samples")
-    
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    # val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Initialize the model, loss function, and optimizer
     model = initialize_model(model_name)
@@ -269,32 +319,32 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     epoch_accuracies = []
     epoch_nmes = []
     epoch_pixel_errors = []
+    val_losses = []
     val_nmes = []
     val_pixel_errors = []
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
+    best_val_loss = float('inf')  # Track the best validation loss
+    best_model_state = None  # Variable to store the best model
+
     for epoch in range(epochs):
-        
-        # if epoch == 200:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] *= 0.1  # Reduce learning rate by 10x
-        
         model.train()
         running_loss = 0.0
         nme_values = []
         pixel_error_values = []
 
+        # Training Loop
         for images, keypoints, original_sizes in train_loader:
             images, keypoints = images.to(device), keypoints.to(device)
-            
+
             optimizer.zero_grad()
             outputs = model(images)
 
             # Combine the center points with the original outputs and keypoints
             outputs_extended, keypoints_extended = extend_with_center_points(outputs, keypoints)
-            
+
             # Calculate loss using the extended tensors
             loss = criterion(outputs_extended, keypoints_extended)
             loss.backward()
@@ -306,11 +356,10 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
             targets = keypoints.cpu().numpy()
 
             # Unpack the original image sizes
-            widths, heights = original_sizes  # original_sizes is a tuple of two tensors
+            widths, heights = original_sizes
             widths = widths.cpu().numpy()  
             heights = heights.cpu().numpy() 
 
-            # Convert the original sizes to a list of tuples
             original_sizes = [(w, h) for w, h in zip(widths, heights)]
 
             # Calculate NME and Pixel Error for each sample
@@ -333,42 +382,77 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
 
         print(f"Epoch [{epoch + 1}/{epochs}], Loss: {epoch_loss:.4f}, NME: {epoch_nme:.4f}, Pixel Error: {epoch_pixel_error:.4f}")
 
-    # Ensure directories exist
+        # Validation Loop
+        model.eval()  # Set the model to evaluation mode
+        val_loss = 0.0
+        val_nme_values = []
+        val_pixel_error_values = []
+
+        with torch.no_grad():  # No need to track gradients during validation
+            for images, keypoints, original_sizes in val_loader:
+                images, keypoints = images.to(device), keypoints.to(device)
+
+                outputs = model(images)
+
+                # Combine the center points with the original outputs and keypoints
+                outputs_extended, keypoints_extended = extend_with_center_points(outputs, keypoints)
+
+                # Calculate loss using the extended tensors
+                loss = criterion(outputs_extended, keypoints_extended)
+                val_loss += loss.item()
+
+                preds = outputs.cpu().detach().numpy()
+                targets = keypoints.cpu().numpy()
+
+                # Unpack the original image sizes
+                widths, heights = original_sizes
+                widths = widths.cpu().numpy()  
+                heights = heights.cpu().numpy()
+
+                original_sizes = [(w, h) for w, h in zip(widths, heights)]
+
+                # Calculate NME and Pixel Error for each sample
+                for i in range(len(original_sizes)):
+                    img_size = original_sizes[i]
+
+                    nme = calculate_nme(preds[i], targets[i], img_size)
+                    pixel_error = calculate_pixel_error(preds[i], targets[i], img_size)
+
+                    val_nme_values.append(nme)
+                    val_pixel_error_values.append(pixel_error)
+
+        val_loss = val_loss / len(val_loader)
+        val_nme = np.mean(val_nme_values)
+        val_pixel_error = np.mean(val_pixel_error_values)
+
+        val_losses.append(val_loss)
+        val_nmes.append(val_nme)
+        val_pixel_errors.append(val_pixel_error)
+
+        print(f"Validation Loss: {val_loss:.4f}, NME: {val_nme:.4f}, Pixel Error: {val_pixel_error:.4f}")
+
+        # Save the model with the best validation loss
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_state = model.state_dict()  # Save the model state at the best point
+            print(f"Validation loss improved, saving model.")
+
+    # Save the best model (with the lowest validation loss)
+    if best_model_state:
+        model_path = f"{MODELS_DIR}/{model_name}_keypoint_{epochs}_{learning_rate}_{batch_size}_best.pth"
+        torch.save(best_model_state, model_path)
+        print(f"Best model saved to: {model_path}")
+
+    # Save the training and validation progress
     os.makedirs(LOGS_DIR, exist_ok=True)
     os.makedirs(MODELS_DIR, exist_ok=True)
 
-    # Plot and save the training progress
+    # --------------------------------------------------------------plotting--------------------------------------------------------------
+    # Save the training progress plot
     epochs_range = range(1, epochs + 1)
-    plt.figure(figsize=(12, 6))
-
-    # Plot Loss with log scale
-    plt.subplot(1, 3, 1)
-    plt.plot(epochs_range, epoch_losses, label="Loss")
-    plt.title("Training Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss(log)")
-    plt.yscale('log')  # Log scale
-    plt.legend()
-
-    # Plot NME
-    plt.subplot(1, 3, 2)
-    plt.plot(epochs_range, epoch_nmes, label="NME")
-    plt.title("Training NME")
-    plt.xlabel("Epoch")
-    plt.ylabel("NME(log)")
-    plt.yscale('log')  # Log scale
-    plt.legend()
-
-    # Plot Pixel Error
-    plt.subplot(1, 3, 3)
-    plt.plot(epochs_range, epoch_pixel_errors, label="Pixel Error")
-    plt.title("Training Pixel Error")
-    plt.xlabel("Epoch")
-    plt.ylabel("Pixel Error(log)")
-    plt.yscale('log')  # Log scale
-    plt.legend()
-
-    plt.tight_layout()
+    plot_training_progress(
+        epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors
+    )
 
     # Save the training plot
     training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_{epochs}_{learning_rate}_{batch_size}.png"
@@ -379,14 +463,26 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     # Save the Loss, NME, and Pixel Error to a text file
     training_log_path = f"{LOGS_DIR}/{model_name}_training_log_{epochs}_{learning_rate}_{batch_size}.txt"
     with open(training_log_path, "w") as f:
-        for epoch, (loss, nme, pixel_error) in enumerate(zip(epoch_losses, epoch_nmes, epoch_pixel_errors), 1):
-            f.write(f"Epoch {epoch}: Loss = {loss:.4f}, NME = {nme:.4f}, Pixel Error = {pixel_error:.4f}\n")
+        for epoch, (loss, nme, pixel_error, val_loss, val_nme, val_pixel_error) in enumerate(
+                zip(epoch_losses, epoch_nmes, epoch_pixel_errors, val_losses, val_nmes, val_pixel_errors), 1):
+            f.write(f"Epoch {epoch}: Loss = {loss:.4f}, NME = {nme:.4f}, Pixel Error = {pixel_error:.4f}, "
+                    f"Val Loss = {val_loss:.4f}, Val NME = {val_nme:.4f}, Val Pixel Error = {val_pixel_error:.4f}\n")
     print(f"Training log saved to: {training_log_path}")
 
-    # Save the model
-    model_path = f"{MODELS_DIR}/{model_name}_keypoint_{epochs}_{learning_rate}_{batch_size}.pth"
-    torch.save(model.state_dict(), model_path)
-    print(f"{model_name} model trained and saved successfully to: {model_path}")
+    # New plot from epoch starting from 20
+    plot_training_progress(
+        epochs_range=None,  # Set to None as we are handling it inside the function
+        epoch_losses=epoch_losses, val_losses=val_losses,
+        epoch_nmes=epoch_nmes, val_nmes=val_nmes,
+        epoch_pixel_errors=epoch_pixel_errors, val_pixel_errors=val_pixel_errors,
+        title_suffix=" (Epoch 20 onwards)", start_epoch=20
+    )
+
+    # Save the new training plot
+    training_plot_path_from20 = f"{LOGS_DIR}/{model_name}_training_plot_from20_{epochs}_{learning_rate}_{batch_size}.png"
+    plt.savefig(training_plot_path_from20)
+    print(f"Training plot from epoch 20 saved to: {training_plot_path_from20}")
+    plt.show()
 
 
 if __name__ == "__main__":
