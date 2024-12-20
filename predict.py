@@ -67,9 +67,19 @@ def predict(model_name, model_path, data_dir, output_dir):
     model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    # Create output directory structure
-    result_dir = os.path.join(output_dir, f"{model_name}_{epochs}_{learning_rate}_{batch_size}", model_name)
+    # Create main output directory
+    result_dir = os.path.join(output_dir, f"{model_name}_{epochs}_{learning_rate}_{batch_size}")
     os.makedirs(result_dir, exist_ok=True)
+
+    # Create subdirectories for distance ranges
+    distance_ranges = {
+        "0-30": os.path.join(result_dir, "0-30"),
+        "31-60": os.path.join(result_dir, "31-60"),
+        "61-90": os.path.join(result_dir, "61-90"),
+        "91+": os.path.join(result_dir, "91+"),
+    }
+    for path in distance_ranges.values():
+        os.makedirs(path, exist_ok=True)
 
     transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -79,7 +89,6 @@ def predict(model_name, model_path, data_dir, output_dir):
 
     all_avg_distances = []  # To store all distances
     image_labels = []  # To store image indices (1, 2, 3, ...)
-
     image_counter = 1  # To keep track of the image index
 
     for image_file in os.listdir(os.path.join(data_dir, 'images')):
@@ -106,6 +115,16 @@ def predict(model_name, model_path, data_dir, output_dir):
             all_avg_distances.append(avg_distance)
             image_labels.append(image_counter)
 
+            # Determine the subdirectory based on avg_distance
+            if avg_distance <= 30:
+                subfolder = distance_ranges["0-30"]
+            elif avg_distance <= 60:
+                subfolder = distance_ranges["31-60"]
+            elif avg_distance <= 90:
+                subfolder = distance_ranges["61-90"]
+            else:
+                subfolder = distance_ranges["91+"]
+
             # Save image with predicted keypoints
             plt.imshow(image, cmap='gray')
             plt.scatter(scaled_keypoints[:, 0], scaled_keypoints[:, 1], c='yellow', marker='o', label='Predicted Keypoints', s=10)
@@ -115,11 +134,11 @@ def predict(model_name, model_path, data_dir, output_dir):
             plt.title(f'Predicted Keypoints for {image_file}')
             plt.axis('off')
             plt.legend()
-            plt.savefig(os.path.join(result_dir, f"{os.path.splitext(image_file)[0]}_prediction.png"))
+            plt.savefig(os.path.join(subfolder, f"{os.path.splitext(image_file)[0]}_prediction.png"))
             plt.close()
 
             # Save predicted keypoints
-            np.savetxt(os.path.join(result_dir, f"{os.path.splitext(image_file)[0]}_keypoints.txt"), scaled_keypoints, fmt="%.2f", delimiter=",")
+            np.savetxt(os.path.join(subfolder, f"{os.path.splitext(image_file)[0]}_keypoints.txt"), scaled_keypoints, fmt="%.2f", delimiter=",")
 
             image_counter += 1  # Increment the image index
 
@@ -143,11 +162,12 @@ def predict(model_name, model_path, data_dir, output_dir):
     plt.legend()
 
     # Save avg distances chart
-    avg_distances_path = os.path.join(output_dir, f"{model_name}_{epochs}_{learning_rate}_{batch_size}", f"{model_name}_avg_distances.png")
+    avg_distances_path = os.path.join(result_dir, f"{model_name}_avg_distances.png")
     plt.savefig(avg_distances_path)
     plt.show()
     
     print(f"Overall average distance: {overall_avg_distance:.2f}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -319,12 +319,16 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
                                    annotation_dir=os.path.join(data_dir, 'val/annotations'), 
                                    transform=transform)
     augmented_dataset = AugmentedKeypointDataset(train_dataset, max_translate_x=20, max_translate_y=20)
+    augmented_dataset2 = AugmentedKeypointDataset(train_dataset, max_angle=10)
     combined_dataset = ConcatDataset([train_dataset, augmented_dataset])
+    combined_dataset = ConcatDataset([combined_dataset, augmented_dataset2])
+    
     # To visualize the dataset
     display_image(train_dataset, 0)
     for i in range(0, 3):
         display_image(augmented_dataset, i)
-
+        display_image(augmented_dataset2, i)
+    
     train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
