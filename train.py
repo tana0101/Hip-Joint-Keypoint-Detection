@@ -245,7 +245,8 @@ def extend_with_center_points(outputs, keypoints):
     
     return outputs_extended, keypoints_extended
 
-def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors, title_suffix="", start_epoch=1):
+def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors, 
+                           title_suffix="", start_epoch=1, loss_ylim=None, nme_ylim=None, pixel_error_ylim=None):
     """
     Function to plot training and validation progress for Loss, NME, and Pixel Error.
     Args:
@@ -258,6 +259,9 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
         val_pixel_errors: Validation Pixel Error for each epoch
         title_suffix: Optional suffix for the plot titles (e.g., " (Epoch 20 onwards)")
         start_epoch: Epoch to start plotting from (default is 1, to plot from the start)
+        loss_ylim: Tuple for Loss y-axis limits (e.g., (0, 1))
+        nme_ylim: Tuple for NME y-axis limits (e.g., (0, 0.1))
+        pixel_error_ylim: Tuple for Pixel Error y-axis limits (e.g., (0, 5))
     """
     # Extract data from start_epoch
     if start_epoch > 1:
@@ -279,6 +283,8 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
     plt.xlabel("Epoch")
     plt.ylabel("Loss (log)")
     plt.yscale('log')  # Log scale
+    if loss_ylim:
+        plt.ylim(loss_ylim)  # Set y-axis limits for Loss
     plt.legend()
 
     # Plot NME
@@ -289,6 +295,8 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
     plt.xlabel("Epoch")
     plt.ylabel("NME (log)")
     plt.yscale('log')  # Log scale
+    if nme_ylim:
+        plt.ylim(nme_ylim)  # Set y-axis limits for NME
     plt.legend()
 
     # Plot Pixel Error
@@ -299,6 +307,8 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
     plt.xlabel("Epoch")
     plt.ylabel("Pixel Error (log)")
     plt.yscale('log')  # Log scale
+    if pixel_error_ylim:
+        plt.ylim(pixel_error_ylim)  # Set y-axis limits for Pixel Error
     plt.legend()
 
     plt.tight_layout()
@@ -329,7 +339,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         display_image(augmented_dataset, i)
         display_image(augmented_dataset2, i)
     
-    train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
@@ -476,7 +486,10 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     # Save the training progress plot
     epochs_range = range(1, epochs + 1)
     plot_training_progress(
-        epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors
+        epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors,
+        loss_ylim=(0, 300),
+        nme_ylim=(0, 0.02),
+        pixel_error_ylim=(0, 200),
     )
 
     # Save the training plot
@@ -500,7 +513,10 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         epoch_losses=epoch_losses, val_losses=val_losses,
         epoch_nmes=epoch_nmes, val_nmes=val_nmes,
         epoch_pixel_errors=epoch_pixel_errors, val_pixel_errors=val_pixel_errors,
-        title_suffix=" (Epoch 20 onwards)", start_epoch=20
+        title_suffix=" (Epoch 20 onwards)", start_epoch=20,
+        loss_ylim=(0, 300),
+        nme_ylim=(0, 0.02),
+        pixel_error_ylim=(0, 200),
     )
 
     # Save the new training plot
