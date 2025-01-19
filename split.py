@@ -2,8 +2,11 @@ import os
 import shutil
 import random
 
-image_folder = "dataset/xray_IHDI_2/images"
-annotation_folder = "dataset/xray_IHDI_2/annotations"
+random_seed = 42  
+random.seed(random_seed)
+
+image_folder = "dataset/xray_IHDI_3/images"
+annotation_folder = "dataset/xray_IHDI_3/annotations"
 output_folder = "data"
 
 for split in ['train', 'val', 'test']:
@@ -16,9 +19,9 @@ annotations = sorted([f for f in os.listdir(annotation_folder) if f.endswith('.c
 assert len(images) == len(annotations)
 
 # Split data into train, val, and test sets
-train_split = 0.7
-val_split = 0.15
-test_split = 0.15
+train_split = 0.8
+val_split = 0.1
+test_split = 0.1
 
 data = list(zip(images, annotations))
 random.shuffle(data)
