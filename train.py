@@ -339,7 +339,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         display_image(augmented_dataset, i)
         display_image(augmented_dataset2, i)
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
@@ -506,25 +506,6 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
             f.write(f"Epoch {epoch}: Loss = {loss:.4f}, NME = {nme:.4f}, Pixel Error = {pixel_error:.4f}, "
                     f"Val Loss = {val_loss:.4f}, Val NME = {val_nme:.4f}, Val Pixel Error = {val_pixel_error:.4f}\n")
     print(f"Training log saved to: {training_log_path}")
-
-    # New plot from epoch starting from 20
-    plot_training_progress(
-        epochs_range=None,  # Set to None as we are handling it inside the function
-        epoch_losses=epoch_losses, val_losses=val_losses,
-        epoch_nmes=epoch_nmes, val_nmes=val_nmes,
-        epoch_pixel_errors=epoch_pixel_errors, val_pixel_errors=val_pixel_errors,
-        title_suffix=" (Epoch 20 onwards)", start_epoch=20,
-        loss_ylim=(0, 300),
-        nme_ylim=(0, 0.02),
-        pixel_error_ylim=(0, 200),
-    )
-
-    # Save the new training plot
-    training_plot_path_from20 = f"{LOGS_DIR}/{model_name}_training_plot_from20_{epochs}_{learning_rate}_{batch_size}.png"
-    plt.savefig(training_plot_path_from20)
-    print(f"Training plot from epoch 20 saved to: {training_plot_path_from20}")
-    plt.show()
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
