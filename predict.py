@@ -82,8 +82,9 @@ def predict(model_name, model_path, data_dir, output_dir):
         os.makedirs(path, exist_ok=True)
 
     transform = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.Grayscale(num_output_channels=3),  
+        transforms.Lambda(lambda img: ImageOps.equalize(img)),  # Apply histogram equalization
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor(),
     ])
 
@@ -96,8 +97,7 @@ def predict(model_name, model_path, data_dir, output_dir):
             image_path = os.path.join(data_dir, 'images', image_file)
             image = Image.open(image_path).convert("L")  
             original_width, original_height = image.size  # Get original dimensions
-            image_equalized = ImageOps.equalize(image)  # Apply histogram equalization
-            image_tensor = transform(image_equalized).unsqueeze(0)
+            image_tensor = transform(image).unsqueeze(0)
 
             with torch.no_grad():
                 keypoints = model(image_tensor).cpu().numpy().reshape(-1, 2)
