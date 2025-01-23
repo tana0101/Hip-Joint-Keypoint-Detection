@@ -9,6 +9,7 @@ from torchvision import models, transforms
 from torch import nn
 import pandas as pd
 import re
+import cv2
 
 IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 12
@@ -96,7 +97,8 @@ def predict(model_name, model_path, data_dir, output_dir):
             image_path = os.path.join(data_dir, 'images', image_file)
             image = Image.open(image_path).convert("L")  
             original_width, original_height = image.size  # Get original dimensions
-            image_tensor = transform(image).unsqueeze(0)
+            image_equalized = cv2.equalizeHist(image) # Apply histogram equalization
+            image_tensor = transform(image_equalized).unsqueeze(0)
 
             with torch.no_grad():
                 keypoints = model(image_tensor).cpu().numpy().reshape(-1, 2)
