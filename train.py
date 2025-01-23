@@ -317,9 +317,9 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
 def main(data_dir, model_name, epochs, learning_rate, batch_size):
     # Transform for data augmentation and normalization
     transform = transforms.Compose([
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.Grayscale(num_output_channels=3),  
         transforms.Lambda(lambda img: ImageOps.equalize(img)),  # Apply histogram equalization
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor(),
     ])
 
@@ -341,7 +341,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         display_image(augmented_dataset, i)
         display_image(augmented_dataset2, i)
     
-    train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
