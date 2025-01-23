@@ -10,7 +10,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
-import cv2
 
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
@@ -32,7 +31,6 @@ class KeypointDataset(Dataset):
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_dir, self.images[idx])
         image = Image.open(img_path).convert("L")  # Convert to grayscale
-        image = cv2.equalizeHist(image) # Apply histogram equalization
         original_width, original_height = image.size  # Get original dimensions
 
         annotation_path = os.path.join(self.annotation_dir, self.annotations[idx])
@@ -321,6 +319,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     transform = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.Grayscale(num_output_channels=3),  
+        transforms.Lambda(lambda img: ImageOps.equalize(img)),  # Apply histogram equalization
         transforms.ToTensor(),
     ])
 
