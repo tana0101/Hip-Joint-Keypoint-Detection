@@ -143,7 +143,7 @@ def predict(model_name, model_path, data_dir, output_dir):
             image_counter += 1  # Increment the image index
 
     # Plot bar chart for avg distances
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(16, 6))
     plt.bar(image_labels, all_avg_distances, color='blue', label='Avg Distance per Image')
 
     # Overall average distance
