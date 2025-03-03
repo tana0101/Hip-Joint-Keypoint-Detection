@@ -280,7 +280,7 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
     plt.subplot(1, 3, 1)
     plt.plot(epochs_range, epoch_losses, label="Training Loss")
     plt.plot(epochs_range, val_losses, label="Validation Loss")
-    plt.title(f"Loss{title_suffix}")
+    plt.title(f"Loss(MSE){title_suffix}")
     plt.xlabel("Epoch")
     plt.ylabel("Loss (log)")
     plt.yscale('log')  # Log scale
