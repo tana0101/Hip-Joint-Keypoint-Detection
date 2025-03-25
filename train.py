@@ -341,8 +341,23 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         display_image(augmented_dataset, i)
         display_image(augmented_dataset2, i)
     
-    train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(
+        combined_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        prefetch_factor=4
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=2,
+        pin_memory=True,
+        prefetch_factor=4
+    )
 
     print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
     
