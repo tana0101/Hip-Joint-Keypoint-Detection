@@ -10,6 +10,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
+from sklearn.model_selection import KFold
+from itertools import cycle
 
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
@@ -314,223 +316,185 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
 
     plt.tight_layout()
 
-def main(data_dir, model_name, epochs, learning_rate, batch_size):
-    # Transform for data augmentation and normalization
+def plot_kfold_results(epochs_range, all_train_losses, all_val_losses, 
+                       all_train_nmes, all_val_nmes, 
+                       all_train_pixel_errors, all_val_pixel_errors):
+
+    metrics = {
+        "MSE": (all_train_losses, all_val_losses),
+        "NME": (all_train_nmes, all_val_nmes),
+        "Pixel Error": (all_train_pixel_errors, all_val_pixel_errors)
+    }
+
+    for metric_name, (train_values, val_values) in metrics.items():
+        plt.figure(figsize=(8, 5))
+
+        color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        num_folds = len(train_values)
+
+        for i in range(num_folds):
+            color = color_cycle[i % len(color_cycle)]  # Get color for fold i
+            plt.plot(epochs_range, train_values[i], linestyle="--", color=color, label=f"Train Fold {i+1}")
+            plt.plot(epochs_range, val_values[i], linestyle="-",  color=color, label=f"Val Fold {i+1}")
+
+        plt.title(f"K-Fold {metric_name}")
+        plt.xlabel("Epoch")
+        plt.ylabel(metric_name)
+        plt.yscale("log")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(f"{LOGS_DIR}/kfold_{metric_name.replace(' ', '_')}.png")
+        plt.show()
+
+def kfold_train(data_dir, model_name, epochs, learning_rate, batch_size, k_folds=5):
+    # Prepare transforms and dataset
     transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=3),  
-        transforms.Lambda(lambda img: ImageOps.equalize(img)),  # Apply histogram equalization
+        transforms.Lambda(lambda img: ImageOps.equalize(img)),
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor(),
     ])
-
-    # Load the dataset and create DataLoaders
-    train_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'train/images'), 
-                                     annotation_dir=os.path.join(data_dir, 'train/annotations'), 
-                                     transform=transform)
-    val_dataset = KeypointDataset(img_dir=os.path.join(data_dir, 'val/images'), 
-                                   annotation_dir=os.path.join(data_dir, 'val/annotations'), 
-                                   transform=transform)
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, max_translate_x=20, max_translate_y=20)
-    augmented_dataset2 = AugmentedKeypointDataset(train_dataset, max_angle=10)
-    combined_dataset = ConcatDataset([train_dataset, augmented_dataset])
-    combined_dataset = ConcatDataset([combined_dataset, augmented_dataset2])
     
-    # To visualize the dataset
-    display_image(train_dataset, 0)
-    for i in range(0, 3):
-        display_image(augmented_dataset, i)
-        display_image(augmented_dataset2, i)
-    
-    train_loader = DataLoader(
-        combined_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-        prefetch_factor=4
+    full_dataset = KeypointDataset(
+        img_dir=os.path.join(data_dir, 'images'), 
+        annotation_dir=os.path.join(data_dir, 'annotations'), 
+        transform=transform
     )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=2,
-        pin_memory=True,
-        prefetch_factor=4
-    )
-
-    print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
     
-    # Initialize the model, loss function, and optimizer
-    model = initialize_model(model_name)
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    kfold = KFold(n_splits=k_folds, shuffle=True, random_state=42)
 
-    # Save the model's training progress
-    epoch_losses = []
-    epoch_accuracies = []
-    epoch_nmes = []
-    epoch_pixel_errors = []
-    val_losses = []
-    val_nmes = []
-    val_pixel_errors = []
+    # Store training logs for plotting
+    all_fold_train_losses = []
+    all_fold_val_losses = []
+    all_fold_train_nmes = []
+    all_fold_val_nmes = []
+    all_fold_train_pixel_errors = []
+    all_fold_val_pixel_errors = []
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+    for fold, (train_idx, val_idx) in enumerate(kfold.split(full_dataset)):
+        print(f"\n--- Fold {fold + 1}/{k_folds} ---")
 
-    best_val_loss = float('inf')  # Track the best validation loss
-    best_model_state = None  # Variable to store the best model
+        # Create train/val subsets
+        train_subset = torch.utils.data.Subset(full_dataset, train_idx)
+        val_subset = torch.utils.data.Subset(full_dataset, val_idx)
 
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0.0
-        nme_values = []
-        pixel_error_values = []
+        # Apply augmentations to training data
+        aug1 = AugmentedKeypointDataset(train_subset, max_translate_x=20, max_translate_y=20)
+        aug2 = AugmentedKeypointDataset(train_subset, max_angle=10)
+        train_combined = ConcatDataset([train_subset, aug1, aug2])
 
-        # Training Loop
-        for images, keypoints, original_sizes in train_loader:
-            images, keypoints = images.to(device), keypoints.to(device)
+        train_loader = DataLoader(
+            train_combined, batch_size=batch_size, shuffle=True,
+            num_workers=4, pin_memory=True, prefetch_factor=4
+        )
 
-            optimizer.zero_grad()
-            outputs = model(images)
+        val_loader = DataLoader(
+            val_subset, batch_size=batch_size, shuffle=False,
+            num_workers=2, pin_memory=True, prefetch_factor=4
+        )
 
-            # Combine the center points with the original outputs and keypoints
-            outputs_extended, keypoints_extended = extend_with_center_points(outputs, keypoints)
+        model = initialize_model(model_name)
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
 
-            # Calculate loss using the extended tensors
-            loss = criterion(outputs_extended, keypoints_extended)
-            loss.backward()
-            optimizer.step()
+        fold_train_losses, fold_val_losses = [], []
+        fold_train_nmes, fold_val_nmes = [], []
+        fold_train_pixel_errors, fold_val_pixel_errors = [], []
 
-            running_loss += loss.item()
+        best_val_loss = float('inf')
+        best_model_state = None
 
-            preds = outputs.cpu().detach().numpy()
-            targets = keypoints.cpu().numpy()
+        for epoch in range(epochs):
+            model.train()
+            train_loss, train_nme_list, train_pixel_list = 0, [], []
 
-            # Unpack the original image sizes
-            widths, heights = original_sizes
-            widths = widths.cpu().numpy()  
-            heights = heights.cpu().numpy() 
-
-            original_sizes = [(w, h) for w, h in zip(widths, heights)]
-
-            # Calculate NME and Pixel Error for each sample
-            for i in range(len(original_sizes)):
-                img_size = original_sizes[i]
-
-                nme = calculate_nme(preds[i], targets[i], img_size)
-                pixel_error = calculate_pixel_error(preds[i], targets[i], img_size)
-
-                nme_values.append(nme)
-                pixel_error_values.append(pixel_error)
-
-        epoch_loss = running_loss / len(train_loader)
-        epoch_nme = np.mean(nme_values)
-        epoch_pixel_error = np.mean(pixel_error_values)
-
-        epoch_losses.append(epoch_loss)
-        epoch_nmes.append(epoch_nme)
-        epoch_pixel_errors.append(epoch_pixel_error)
-
-        print(f"Epoch [{epoch + 1}/{epochs}], Loss: {epoch_loss:.4f}, NME: {epoch_nme:.4f}, Pixel Error: {epoch_pixel_error:.4f}")
-
-        # Validation Loop
-        model.eval()  # Set the model to evaluation mode
-        val_loss = 0.0
-        val_nme_values = []
-        val_pixel_error_values = []
-
-        with torch.no_grad():  # No need to track gradients during validation
-            for images, keypoints, original_sizes in val_loader:
+            for images, keypoints, original_sizes in train_loader:
                 images, keypoints = images.to(device), keypoints.to(device)
-
+                optimizer.zero_grad()
                 outputs = model(images)
-
-                # Combine the center points with the original outputs and keypoints
-                outputs_extended, keypoints_extended = extend_with_center_points(outputs, keypoints)
-
-                # Calculate loss using the extended tensors
-                loss = criterion(outputs_extended, keypoints_extended)
-                val_loss += loss.item()
+                outputs_ext, keypoints_ext = extend_with_center_points(outputs, keypoints)
+                loss = criterion(outputs_ext, keypoints_ext)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
 
                 preds = outputs.cpu().detach().numpy()
                 targets = keypoints.cpu().numpy()
-
-                # Unpack the original image sizes
                 widths, heights = original_sizes
-                widths = widths.cpu().numpy()  
-                heights = heights.cpu().numpy()
+                sizes = [(w, h) for w, h in zip(widths.numpy(), heights.numpy())]
+                for i in range(len(sizes)):
+                    train_nme_list.append(calculate_nme(preds[i], targets[i], sizes[i]))
+                    train_pixel_list.append(calculate_pixel_error(preds[i], targets[i], sizes[i]))
 
-                original_sizes = [(w, h) for w, h in zip(widths, heights)]
+            train_loss /= len(train_loader)
+            fold_train_losses.append(train_loss)
+            fold_train_nmes.append(np.mean(train_nme_list))
+            fold_train_pixel_errors.append(np.mean(train_pixel_list))
 
-                # Calculate NME and Pixel Error for each sample
-                for i in range(len(original_sizes)):
-                    img_size = original_sizes[i]
+            # ---- Validation
+            model.eval()
+            val_loss, val_nme_list, val_pixel_list = 0, [], []
+            with torch.no_grad():
+                for images, keypoints, original_sizes in val_loader:
+                    images, keypoints = images.to(device), keypoints.to(device)
+                    outputs = model(images)
+                    outputs_ext, keypoints_ext = extend_with_center_points(outputs, keypoints)
+                    loss = criterion(outputs_ext, keypoints_ext)
+                    val_loss += loss.item()
 
-                    nme = calculate_nme(preds[i], targets[i], img_size)
-                    pixel_error = calculate_pixel_error(preds[i], targets[i], img_size)
+                    preds = outputs.cpu().detach().numpy()
+                    targets = keypoints.cpu().numpy()
+                    widths, heights = original_sizes
+                    sizes = [(w, h) for w, h in zip(widths.numpy(), heights.numpy())]
+                    for i in range(len(sizes)):
+                        val_nme_list.append(calculate_nme(preds[i], targets[i], sizes[i]))
+                        val_pixel_list.append(calculate_pixel_error(preds[i], targets[i], sizes[i]))
 
-                    val_nme_values.append(nme)
-                    val_pixel_error_values.append(pixel_error)
+            val_loss /= len(val_loader)
+            fold_val_losses.append(val_loss)
+            fold_val_nmes.append(np.mean(val_nme_list))
+            fold_val_pixel_errors.append(np.mean(val_pixel_list))
 
-        val_loss = val_loss / len(val_loader)
-        val_nme = np.mean(val_nme_values)
-        val_pixel_error = np.mean(val_pixel_error_values)
+            print(f"[Fold {fold+1}] Epoch {epoch+1}/{epochs} - "
+                  f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
-        val_losses.append(val_loss)
-        val_nmes.append(val_nme)
-        val_pixel_errors.append(val_pixel_error)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_model_state = model.state_dict()
 
-        print(f"Validation Loss: {val_loss:.4f}, NME: {val_nme:.4f}, Pixel Error: {val_pixel_error:.4f}")
+        # Save best model per fold
+        os.makedirs(MODELS_DIR, exist_ok=True)
+        torch.save(best_model_state, f"{MODELS_DIR}/fold_{fold+1}_best.pth")
 
-        # Save the model with the best validation loss
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_model_state = model.state_dict()  # Save the model state at the best point
-            print(f"Validation loss improved, saving model.")
+        # Save results of this fold
+        all_fold_train_losses.append(fold_train_losses)
+        all_fold_val_losses.append(fold_val_losses)
+        all_fold_train_nmes.append(fold_train_nmes)
+        all_fold_val_nmes.append(fold_val_nmes)
+        all_fold_train_pixel_errors.append(fold_train_pixel_errors)
+        all_fold_val_pixel_errors.append(fold_val_pixel_errors)
 
-    # Save the best model (with the lowest validation loss)
-    if best_model_state:
-        model_path = f"{MODELS_DIR}/{model_name}_keypoint_{epochs}_{learning_rate}_{batch_size}_best.pth"
-        torch.save(best_model_state, model_path)
-        print(f"Best model saved to: {model_path}")
-
-    # Save the training and validation progress
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    os.makedirs(MODELS_DIR, exist_ok=True)
-
-    # --------------------------------------------------------------plotting--------------------------------------------------------------
-    # Save the training progress plot
+    # Plot all fold curves
     epochs_range = range(1, epochs + 1)
-    plot_training_progress(
-        epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors,
-        loss_ylim=(0, 300),
-        nme_ylim=(0, 0.02),
-        pixel_error_ylim=(0, 200),
+    plot_kfold_results(
+        epochs_range,
+        all_fold_train_losses, all_fold_val_losses,
+        all_fold_train_nmes, all_fold_val_nmes,
+        all_fold_train_pixel_errors, all_fold_val_pixel_errors
     )
 
-    # Save the training plot
-    training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_{epochs}_{learning_rate}_{batch_size}.png"
-    plt.savefig(training_plot_path)
-    print(f"Training plot saved to: {training_plot_path}")
-    plt.show()
-
-    # Save the Loss, NME, and Pixel Error to a text file
-    training_log_path = f"{LOGS_DIR}/{model_name}_training_log_{epochs}_{learning_rate}_{batch_size}.txt"
-    with open(training_log_path, "w") as f:
-        for epoch, (loss, nme, pixel_error, val_loss, val_nme, val_pixel_error) in enumerate(
-                zip(epoch_losses, epoch_nmes, epoch_pixel_errors, val_losses, val_nmes, val_pixel_errors), 1):
-            f.write(f"Epoch {epoch}: Loss = {loss:.4f}, NME = {nme:.4f}, Pixel Error = {pixel_error:.4f}, "
-                    f"Val Loss = {val_loss:.4f}, Val NME = {val_nme:.4f}, Val Pixel Error = {val_pixel_error:.4f}\n")
-    print(f"Training log saved to: {training_log_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, required=True, help="Path to the dataset directory")
-    parser.add_argument("--model_name", type=str, required=True, help="Model name: 'efficientnet', 'resnet', or 'vgg'")
-    parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs")
-    parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate")
-    parser.add_argument("--batch_size", type=int, default=8, help="Number of samples per batch")
+    parser.add_argument("--data_dir", type=str, required=True)
+    parser.add_argument("--model_name", type=str, required=True)
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--learning_rate", type=float, default=0.001)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--k_folds", type=int, default=5)
     args = parser.parse_args()
 
-    main(args.data_dir, args.model_name, args.epochs, args.learning_rate, args.batch_size)
+    kfold_train(args.data_dir, args.model_name, args.epochs, args.learning_rate, args.batch_size, args.k_folds)
+
