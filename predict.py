@@ -73,11 +73,17 @@ def predict(model_name, model_path, data_dir, output_dir):
 
     # Create subdirectories for distance ranges
     distance_ranges = {
-        "0-30": os.path.join(result_dir, "0-30"),
-        "31-60": os.path.join(result_dir, "31-60"),
-        "61-90": os.path.join(result_dir, "61-90"),
-        "91+": os.path.join(result_dir, "91+"),
+        "0-7.5": os.path.join(result_dir, "0-7.5"),
+        "7.5-10": os.path.join(result_dir, "7.5-10"),
+        "10-12.5": os.path.join(result_dir, "10-12.5"),
+        "12.5-15": os.path.join(result_dir, "12.5-15"),
+        "15-17.5": os.path.join(result_dir, "15-17.5"),
+        "17.5-20": os.path.join(result_dir, "17.5-20"),
+        "20-30": os.path.join(result_dir, "20-30"),
+        "30-40": os.path.join(result_dir, "30-40"),
+        "40+": os.path.join(result_dir, "40+"),
     }
+    
     for path in distance_ranges.values():
         os.makedirs(path, exist_ok=True)
 
@@ -117,14 +123,24 @@ def predict(model_name, model_path, data_dir, output_dir):
             image_labels.append(image_counter)
 
             # Determine the subdirectory based on avg_distance
-            if avg_distance <= 30:
-                subfolder = distance_ranges["0-30"]
-            elif avg_distance <= 60:
-                subfolder = distance_ranges["31-60"]
-            elif avg_distance <= 90:
-                subfolder = distance_ranges["61-90"]
+            if avg_distance <= 7.5:
+                subfolder = distance_ranges["0-7.5"]
+            elif avg_distance <= 10:
+                subfolder = distance_ranges["7.5-10"]
+            elif avg_distance <= 12.5:
+                subfolder = distance_ranges["10-12.5"]
+            elif avg_distance <= 15:
+                subfolder = distance_ranges["12.5-15"]
+            elif avg_distance <= 17.5:
+                subfolder = distance_ranges["15-17.5"]
+            elif avg_distance <= 20:
+                subfolder = distance_ranges["17.5-20"]
+            elif avg_distance <= 30:
+                subfolder = distance_ranges["20-30"]
+            elif avg_distance <= 40:
+                subfolder = distance_ranges["30-40"]
             else:
-                subfolder = distance_ranges["91+"]
+                subfolder = distance_ranges["40+"]
 
             # Save image with predicted keypoints
             plt.imshow(image, cmap='gray')
