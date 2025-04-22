@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, transforms
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from PIL import Image
 import pandas as pd
 import numpy as np
@@ -365,6 +366,13 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     model = initialize_model(model_name)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(
+        optimizer, 
+        mode='min',        
+        factor=0.1,        
+        patience=100,       
+        verbose=True       
+    )
 
     # Save the model's training progress
     epoch_losses = []
@@ -433,7 +441,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         epoch_pixel_errors.append(epoch_pixel_error)
 
         print(f"Epoch [{epoch + 1}/{epochs}], Loss: {epoch_loss:.4f}, NME: {epoch_nme:.4f}, Pixel Error: {epoch_pixel_error:.4f}")
-
+        
         # Validation Loop
         model.eval()  # Set the model to evaluation mode
         val_loss = 0.0
@@ -481,13 +489,15 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         val_nmes.append(val_nme)
         val_pixel_errors.append(val_pixel_error)
 
-        print(f"Validation Loss: {val_loss:.4f}, NME: {val_nme:.4f}, Pixel Error: {val_pixel_error:.4f}")
+        print(f"Validation Loss: {val_loss:.4f}, NME: {val_nme:.4f}, Pixel Error: {val_pixel_error:.4f}, Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
 
         # Save the model with the best validation loss
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_model_state = model.state_dict()  # Save the model state at the best point
             print(f"Validation loss improved, saving model.")
+            
+        scheduler.step(val_nme) # Reduce learning rate based on validation NME
 
     # Save the best model (with the lowest validation loss)
     if best_model_state:
