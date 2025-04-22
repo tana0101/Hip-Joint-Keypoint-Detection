@@ -5,8 +5,8 @@ import random
 random_seed = 42  
 random.seed(random_seed)
 
-image_folder = "dataset/xray_IHDI_4/images"
-annotation_folder = "dataset/xray_IHDI_4/annotations"
+image_folder = "dataset/xray_IHDI_5/images"
+annotation_folder = "dataset/xray_IHDI_5/annotations"
 output_folder = "data"
 
 for split in ['train', 'val', 'test']:

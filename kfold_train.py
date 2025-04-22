@@ -475,6 +475,34 @@ def kfold_train(data_dir, model_name, epochs, learning_rate, batch_size, k_folds
         all_fold_val_nmes.append(fold_val_nmes)
         all_fold_train_pixel_errors.append(fold_train_pixel_errors)
         all_fold_val_pixel_errors.append(fold_val_pixel_errors)
+        
+        # 每個 fold 各自畫圖
+        plot_training_progress(
+            epochs_range=range(1, epochs + 1),
+            epoch_losses=fold_train_losses,
+            val_losses=fold_val_losses,
+            epoch_nmes=fold_train_nmes,
+            val_nmes=fold_val_nmes,
+            epoch_pixel_errors=fold_train_pixel_errors,
+            val_pixel_errors=fold_val_pixel_errors,
+            title_suffix=f" (Fold {fold + 1})",
+            loss_ylim=(0, 300),
+            nme_ylim=(0, 0.02),
+            pixel_error_ylim=(0, 200),
+        )
+        plt.savefig(f"{LOGS_DIR}/fold_{fold + 1}_progress.png")
+        plt.close()
+        
+        # 每個 fold 各自寫 log.txt
+        os.makedirs(LOGS_DIR, exist_ok=True)
+        training_log_path = f"{LOGS_DIR}/fold_{fold + 1}_training_log_{model_name}_{epochs}_{learning_rate}_{batch_size}.txt"
+        with open(training_log_path, "w") as f:
+            for epoch, (loss, nme, pixel_error, val_loss, val_nme, val_pixel_error) in enumerate(
+                    zip(fold_train_losses, fold_train_nmes, fold_train_pixel_errors,
+                        fold_val_losses, fold_val_nmes, fold_val_pixel_errors), 1):
+                f.write(f"Epoch {epoch}: Loss = {loss:.4f}, NME = {nme:.4f}, Pixel Error = {pixel_error:.4f}, "
+                        f"Val Loss = {val_loss:.4f}, Val NME = {val_nme:.4f}, Val Pixel Error = {val_pixel_error:.4f}\n")
+        print(f"Training log saved to: {training_log_path}")
 
     # Plot all fold curves
     epochs_range = range(1, epochs + 1)
