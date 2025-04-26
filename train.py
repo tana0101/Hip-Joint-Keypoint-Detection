@@ -477,7 +477,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
         val_loss = val_loss / len(val_loader)
         val_nme = np.mean(val_nme_values)
         val_pixel_error = np.mean(val_pixel_error_values)
-
+        
         val_losses.append(val_loss)
         val_nmes.append(val_nme)
         val_pixel_errors.append(val_pixel_error)
@@ -489,7 +489,13 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
             best_val_loss = val_loss
             best_model_state = model.state_dict()  # Save the model state at the best point
             print(f"Validation loss improved, saving model.")
-
+            
+        if epoch + 1 == 1000:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] *= 0.1
+            print(f"[Epoch {epoch+1}] Learning rate manually reduced.")
+            print(f"Learning rate reduced to {optimizer.param_groups[0]['lr']}")
+        
     # Save the best model (with the lowest validation loss)
     if best_model_state:
         model_path = f"{MODELS_DIR}/{model_name}_keypoint_{epochs}_{learning_rate}_{batch_size}_best.pth"
