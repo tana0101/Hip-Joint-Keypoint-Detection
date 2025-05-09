@@ -61,15 +61,63 @@ def extract_info_from_model_path(model_path):
 
 def draw_hilgenreiner_line(ax, p3, p7):
     if np.allclose(p3[0], p7[0]):
-        ax.axvline(x=p3[0], color='cyan', linewidth=1, label='Hilgenreiner Line')
+        ax.axvline(x=p3[0], color='cyan', linewidth=1, label='H-Line')
     else:
         a = (p7[1] - p3[1]) / (p7[0] - p3[0])
         b = p3[1] - a * p3[0]
         x_min, x_max = ax.get_xlim()
         x_vals = np.array([x_min, x_max])
         y_vals = a * x_vals + b
-        ax.plot(x_vals, y_vals, color='cyan', linewidth=1, label='Hilgenreiner Line')
+        ax.plot(x_vals, y_vals, color='cyan', linewidth=1, label='H-Line')
+        
+def draw_perpendicular_line(ax, point, line_p1, line_p2, color='lime', label=None):
+    # 向量方向（H-line）
+    dx = line_p2[0] - line_p1[0]
+    dy = line_p2[1] - line_p1[1]
 
+    # 垂直向量：旋轉90度 (-dy, dx)
+    perp_dx = -dy
+    perp_dy = dx
+
+    # 將垂直向量延長一定比例來畫線
+    scale = 1  # 可調整線的長度
+    x0, y0 = point
+    x_vals = np.array([x0 - scale * perp_dx, x0 + scale * perp_dx])
+    y_vals = np.array([y0 - scale * perp_dy, y0 + scale * perp_dy])
+
+    ax.plot(x_vals, y_vals, color=color, linewidth=1, label=label)
+
+def draw_diagonal_line(ax, point, line_p1, line_p2, direction="left_down", color='orange', label=None):
+    a = np.array(line_p1)
+    b = np.array(line_p2)
+    p = np.array(point)
+    v = b - a
+
+    # 計算投影點（交點）
+    proj = a + v * np.dot(p - a, v) / np.dot(v, v)
+
+    # 決定方向
+    length = 100
+    if direction == "left_down":
+        dx, dy = -length, length   # 斜率 +1
+    elif direction == "right_down":
+        dx, dy = length, length    # 斜率 -1
+    else:
+        raise ValueError("direction must be 'left_down' or 'right_down'")
+
+    x_vals = [proj[0], proj[0] + dx]
+    y_vals = [proj[1], proj[1] + dy]
+    ax.plot(x_vals, y_vals, color=color, linewidth=1, label=label)
+
+def draw_h_point(ax, kpts):
+    h_left = (kpts[9] + kpts[11]) / 2   # pt10 & pt12 中點
+    h_right = (kpts[3] + kpts[5]) / 2   # pt4 & pt6 中點
+
+    # 使用亮黃色 + 圓形
+    ax.scatter(*h_left, c="blue", s=4, label='H-point')
+    ax.scatter(*h_right, c="blue", s=4)
+
+# 計算 AI 角度
 def calculate_acetabular_index_angles(points):
     p1 = points[0]
     p3 = points[2]
@@ -83,7 +131,91 @@ def calculate_acetabular_index_angles(points):
         return np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
     return angle(v_h, v_left), angle(-v_h, v_right)
 
-def draw_comparison_figure(image, pred_kpts, gt_kpts, ai_pred, ai_gt, avg_distance, save_path, image_file):
+# 判斷IHDI象限
+def classify_quadrant_ihdi(points):
+    """
+    根據 IHDI 分類圖，判斷左右 H-point 各自落在哪個象限。
+    
+    參數
+    -------
+    points : array-like, shape=(12, 2)
+        依序為 1~12 點的 (x, y) 影像座標（x 向右、y 向下）。
+    
+    回傳
+    -------
+    left_q , right_q : str
+        左、右股骨頭中心所在象限，字元 'I' ~ 'IV'
+        
+    實作方式
+    -------
+    將股骨頭中心點（H-point）投影到以 H-line 為水平、P-line 為垂直的局部座標系中，並依其位置判斷其落在哪個象限（I~IV）。
+    
+    """
+    pts = np.asarray(points, dtype=float)
+    if pts.shape != (12, 2):
+        raise ValueError("`points` 必須是 (12, 2) 的座標陣列")
+
+    # ---- 取出關鍵點 --------------------------------------------------------
+    p1  = pts[0]      # 左 P-line 基準
+    p3  = pts[2]      # H-line 起點
+    p4  = pts[3]      # 左股骨頭
+    p6  = pts[5]
+    p7  = pts[6]      # H-line 終點
+    p9  = pts[8]      # 右 P-line 基準
+    p10 = pts[9]      # 右股骨頭
+    p12 = pts[11]
+
+    # ---- 基準座標系：x 軸沿 H-line，y 軸向下 ------------------------------
+    v_h = p7 - p3
+    u_h = v_h / np.linalg.norm(v_h)                     # 單位 H 向量
+
+    # 兩種垂直方向：順時針 / 逆時針 90°
+    v_p1 = np.array([ v_h[1], -v_h[0]])
+    v_p2 = np.array([-v_h[1],  v_h[0]])
+    v_p  = v_p1 if v_p1[1] > v_p2[1] else v_p2          # y 分量大的朝「下」
+    u_p  = v_p / np.linalg.norm(v_p)                    # 單位「下」向量
+
+    # H-line 與 P-line 交點（作為原點）
+    def proj_on_h(pt):                                  # 投影到 H-line
+        t = np.dot(pt - p3, u_h)
+        return p3 + t * u_h
+
+    o_r = proj_on_h(p9)                                 # 右側原點
+    o_l = proj_on_h(p1)                                 # 左側原點
+
+    # H-points
+    h_r = (p10 + p12) / 2.0
+    h_l = (p4  + p6 ) / 2.0
+
+    # 轉成局部 (x, y)
+    def to_xy(p, o):
+        vec = p - o
+        return np.dot(vec, u_h), np.dot(vec, u_p)
+
+    x_r, y_r = to_xy(h_r, o_r)
+    x_l, y_l = to_xy(h_l, o_l)
+    x_l = -x_l            # 左側鏡射：使遠離脊椎方向為 x 正
+
+    # ---- 象限規則（以右側為基準） -----------------------------------------
+    def quad(x, y):
+        # IV：在 H-line 上方／接近上方
+        if y <= 0 and x >= 0:
+            return 'IV'
+        # I：H-line 下 + P-line 左
+        if y > 0 and x < 0:
+            return 'I'
+        # II / III：H-line 下 + P-line 右，依對角線分界
+        if y > 0 and x >= 0:
+            return 'II' if y > x else 'III'
+        # 其他極少見邊界情況 → 歸為 none
+        return 'none'
+
+    return quad(x_l, y_l), quad(x_r, y_r)
+
+def draw_comparison_figure(
+    image, pred_kpts, gt_kpts, ai_pred, ai_gt,
+    quadrants_pred, quadrants_gt,
+    avg_distance, save_path, image_file):
     """
     建立左右對照圖：左圖使用預測點畫線，右圖使用 ground truth 畫線
 
@@ -92,15 +224,17 @@ def draw_comparison_figure(image, pred_kpts, gt_kpts, ai_pred, ai_gt, avg_distan
     gt_kpts: ground truth keypoints
     ai_pred: (left, right) 使用預測點計算出來的 AI angle
     ai_gt: (left, right) 使用 ground truth 計算出來的 AI angle
+    quadrants_pred: (left, right) 使用預測點計算出來的象限
+    quadrants_gt: (left, right) 使用 ground truth 計算出來的象限
     avg_distance: 平均距離
     save_path: 要儲存的路徑
     image_file: 圖片名稱（用來命名）
     """
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
-    for i, (kpts, title, ai) in enumerate([
-        (pred_kpts, "Using Predicted Keypoints", ai_pred),
-        (gt_kpts, "Using Ground Truth Keypoints", ai_gt)
+    for i, (kpts, title, ai, quadrants) in enumerate([
+        (pred_kpts, "Using Predicted Keypoints", ai_pred, quadrants_pred),
+        (gt_kpts, "Using Ground Truth Keypoints", ai_gt, quadrants_gt)
     ]):
         ax = axes[i]
         ax.imshow(image, cmap='gray')
@@ -112,22 +246,29 @@ def draw_comparison_figure(image, pred_kpts, gt_kpts, ai_pred, ai_gt, avg_distan
         # # 畫關鍵點編號
         # for j, (x, y) in enumerate(kpts):
         #     ax.text(x + 2, y - 2, str(j + 1), color='white', fontsize=8, weight='bold')
+        pts = {i: kpts[i] for i in [0, 2, 3, 5, 6, 8, 9, 11]}
+        p1, p3, p4, p6, p7, p9, p10, p12 = pts[0], pts[2], pts[3], pts[5], pts[6], pts[8], pts[9], pts[11]
 
-        p1 = kpts[0]
-        p3 = kpts[2]
-        p7 = kpts[6]
-        p9 = kpts[8]
-
-        draw_hilgenreiner_line(ax, p3, p7)
-        ax.plot([p7[0], p9[0]], [p7[1], p9[1]], color='magenta', linewidth=1, label='Left Roof Line')
-        ax.plot([p3[0], p1[0]], [p3[1], p1[1]], color='magenta', linewidth=1, label='Right Roof Line')
+        # 畫 Roof Line
+        ax.plot([p7[0], p9[0]], [p7[1], p9[1]], color='magenta', linewidth=1, label='Roof Line')
+        ax.plot([p3[0], p1[0]], [p3[1], p1[1]], color='magenta', linewidth=1)
         
-        ax.text(10, image.size[1] + 35, f'AI Left: {ai[0]:.1f}°', color='magenta', fontsize=11)
-        ax.text(10, image.size[1] + 85, f'AI Right: {ai[1]:.1f}°', color='magenta', fontsize=11)
-
-    # 計算角度誤差
-    ai_error_left = abs(ai_pred[0] - ai_gt[0])
-    ai_error_right = abs(ai_pred[1] - ai_gt[1])
+        # 畫 H-line（p3, p7）連線
+        draw_hilgenreiner_line(ax, p3, p7)
+        # 畫 P-line（從 p1 垂直 H-line、從 p9 垂直 H-line）
+        draw_perpendicular_line(ax, p1, p3, p7, color='lime', label='P-line')
+        draw_perpendicular_line(ax, p9, p3, p7, color='lime')
+        # 畫 Diagonal lines from P-line/H-line intersection
+        draw_diagonal_line(ax, p1, p3, p7, direction="left_down", color='orange', label='Diagonal Line')
+        draw_diagonal_line(ax, p9, p3, p7, direction="right_down", color='orange')
+        # 繪製 H-point
+        draw_h_point(ax, kpts)
+        
+        # 解構象限
+        left_q, right_q = quadrants
+        
+        ax.text(10, image.size[1] + 35, f'AI Left: {ai[0]:.1f}°  (Q{left_q})', color='magenta', fontsize=11)
+        ax.text(10, image.size[1] + 85, f'AI Right: {ai[1]:.1f}°  (Q{right_q})', color='magenta', fontsize=11)
 
     # 百分比誤差（避免除以 0）
     def format_error(pred, gt):
@@ -142,11 +283,22 @@ def draw_comparison_figure(image, pred_kpts, gt_kpts, ai_pred, ai_gt, avg_distan
     diag_len = (image.size[0] ** 2 + image.size[1] ** 2) ** 0.5
     avg_dist_percent = avg_distance / diag_len * 100
 
+    # 解構象限
+    left_q_pred, right_q_pred = quadrants_pred
+    left_q_gt, right_q_gt = quadrants_gt
+
+    # 判斷是否正確
+    left_match = "✓" if left_q_pred == left_q_gt else "✗"
+    right_match = "✓" if right_q_pred == right_q_gt else "✗"
+
     # 輸出資訊到圖下方
-    fig.text(0.5, -0.05,
-             f"Avg Distance: {avg_distance:.2f} px ({avg_dist_percent:.2f}% of image diagonal)    "
-             f"AI Error (L/R): {format_error(ai_pred[0], ai_gt[0])} / {format_error(ai_pred[1], ai_gt[1])}",
-             ha='center', fontsize=12, color='blue')
+    fig.text(
+        0.5, -0.05,
+        f"Avg Distance: {avg_distance:.2f} px ({avg_dist_percent:.2f}% of image diagonal)    "
+        f"AI Error (L/R): {format_error(ai_pred[0], ai_gt[0])} / {format_error(ai_pred[1], ai_gt[1])}    "
+        f"Quadrant (L/R): {left_q_gt} ({left_match}) / {right_q_gt} ({right_match})    ",
+        ha='center', fontsize=12, color='blue'
+    )
 
     axes[0].legend(loc='lower left')
     plt.tight_layout()
@@ -219,14 +371,16 @@ def predict(model_name, model_path, data_dir, output_dir):
             all_avg_distances.append(avg_distance)
             image_labels.append(image_counter)
             
-            # Calculate AI angle（預測）
+            # Calculate AI angles
             ai_left_pred, ai_right_pred = calculate_acetabular_index_angles(scaled_keypoints)
-
-            # Calculate AI angle（ground truth）
             ai_left_gt, ai_right_gt = calculate_acetabular_index_angles(original_keypoints)
             
             ai_errors_left.append(abs(ai_left_pred - ai_left_gt))
             ai_errors_right.append(abs(ai_right_pred - ai_right_gt))
+            
+            # Classify quadrants
+            left_quadrants_pred, right_quadrants_pred = classify_quadrant_ihdi(scaled_keypoints)
+            left_quadrants_gt, right_quadrants_gt = classify_quadrant_ihdi(original_keypoints)
             
             # Determine the subdirectory based on avg_distance
             if avg_distance <= 7.5:
@@ -255,6 +409,8 @@ def predict(model_name, model_path, data_dir, output_dir):
                 gt_kpts=original_keypoints,
                 ai_pred=(ai_left_pred, ai_right_pred),
                 ai_gt=(ai_left_gt, ai_right_gt),
+                quadrants_pred=(left_quadrants_pred, right_quadrants_pred),
+                quadrants_gt=(left_quadrants_gt, right_quadrants_gt),
                 avg_distance=avg_distance,
                 save_path=subfolder,
                 image_file=image_file
