@@ -9,7 +9,8 @@ from torchvision import models, transforms
 from torch import nn
 import pandas as pd
 import re
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score
+from scipy.stats import pearsonr
 
 IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 12
@@ -306,8 +307,6 @@ def draw_comparison_figure(
     fig.savefig(os.path.join(save_path, f"{os.path.splitext(image_file)[0]}_compare.png"), bbox_inches='tight')
     plt.close()
 
-
-
 # 修改後的 predict 函數片段 (整合 confusion matrix 統計)
 def compute_and_save_confusion_matrices_with_accuracy(left_preds, left_gts, right_preds, right_gts, save_dir):
     labels = ['I', 'II', 'III', 'IV']
@@ -349,6 +348,79 @@ def compute_and_save_confusion_matrices_with_accuracy(left_preds, left_gts, righ
 
     return acc_left, acc_right, acc_all
 
+import numpy as np
+from sklearn.metrics import r2_score
+from scipy.stats import pearsonr
+import matplotlib.pyplot as plt
+
+def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
+    x = np.array(gt_list)
+    y = np.array(pred_list)
+
+    # 回歸線 y = ax + b
+    a, b = np.polyfit(x, y, 1)
+    x_line = np.linspace(x.min(), x.max(), 100)
+    y_line = a * x_line + b
+
+    # 評估指標
+    r, _ = pearsonr(x, y)
+    r2 = r2_score(x, y)
+
+    # 繪圖
+    plt.figure(figsize=(6, 6))
+    plt.scatter(x, y, c='blue', alpha=0.6, label='Predicted vs. Ground Truth')
+
+    # 畫理想線
+    plt.plot([x.min(), x.max()], [x.min(), x.max()], 'g--', label='Ideal Line (y = x)')
+
+    # 畫回歸線
+    plt.plot(x_line, y_line, 'r--', label=f'Regression Line: y = {a:.2f}x + {b:.2f}')
+
+    plt.title(f"{side} AI Angle Prediction\nr = {r:.2f}, R² = {r2:.2f}")
+    plt.xlabel("Ground Truth AI Angle (°)")
+    plt.ylabel("Predicted AI Angle (°)")
+    plt.legend()
+    plt.grid(True)
+
+    if save_path:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
+    # 確保是 np.array
+    x = np.array(pixel_errors)
+    y = np.array(ai_errors_avg)
+
+    # 計算統計指標
+    r, _ = pearsonr(x, y)
+    r2 = r2_score(x, y)
+
+    # 線性回歸：y = a * x + b
+    a, b = np.polyfit(x, y, 1)
+    x_line = np.linspace(x.min(), x.max(), 100)
+    y_line = a * x_line + b
+
+    # 繪圖
+    plt.figure(figsize=(6, 6))
+    plt.scatter(x, y, color='orange', alpha=0.7, label='Avg AI Angle Error vs. Pixel Error')
+    plt.plot(x_line, y_line, 'r--', label=f'Regression Line: y = {a:.2f}x + {b:.2f}')
+
+    plt.xlabel("Avg Pixel Distance Error")
+    plt.ylabel("Avg AI Angle Error (°)")
+    plt.title(f"Pixel vs. Angle Error\nr = {r:.2f}, R² = {r2:.2f}")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+        plt.close()
+    else:
+        plt.show()
+
 def predict(model_name, model_path, data_dir, output_dir):
     # Extract training information from model path
     epochs, learning_rate, batch_size = extract_info_from_model_path(model_path)
@@ -389,6 +461,10 @@ def predict(model_name, model_path, data_dir, output_dir):
     image_counter = 1  # To keep track of the image index
     ai_errors_left = [] # To store AI angle errors (left)
     ai_errors_right = [] # To store AI angle errors (right)
+    ai_left_gt_list = [] # To store left ground truth AI angles
+    ai_left_pred_list = [] # To store left predicted AI angles
+    ai_right_gt_list = [] # To store right ground truth AI angles
+    ai_right_pred_list = [] # To store right predicted AI angles
     left_preds_all = [] # To store left predicted keypoints
     left_gts_all = [] # To store left ground truth keypoints
     right_preds_all = [] # To store right predicted keypoints
@@ -423,6 +499,10 @@ def predict(model_name, model_path, data_dir, output_dir):
             ai_left_pred, ai_right_pred = calculate_acetabular_index_angles(scaled_keypoints)
             ai_left_gt, ai_right_gt = calculate_acetabular_index_angles(original_keypoints)
             
+            ai_left_pred_list.append(ai_left_pred)
+            ai_right_pred_list.append(ai_right_pred)
+            ai_left_gt_list.append(ai_left_gt)
+            ai_right_gt_list.append(ai_right_gt)
             ai_errors_left.append(abs(ai_left_pred - ai_left_gt))
             ai_errors_right.append(abs(ai_right_pred - ai_right_gt))
             
@@ -529,6 +609,7 @@ def predict(model_name, model_path, data_dir, output_dir):
     plt.savefig(ai_error_chart_path)
     plt.show()
 
+    # 計算IHDI classification的混淆矩陣跟準確度
     acc_left, acc_right, acc_all = compute_and_save_confusion_matrices_with_accuracy(
         left_preds=left_preds_all,
         left_gts=left_gts_all,
@@ -540,8 +621,39 @@ def predict(model_name, model_path, data_dir, output_dir):
     print(f"Left quadrant accuracy: {acc_left:.2%}")
     print(f"Right quadrant accuracy: {acc_right:.2%}")
     print(f"Overall quadrant accuracy: {acc_all:.2%}")
+    
+    # 計算 AI 角度的相關性
+    # 左側
+    r_left, _ = pearsonr(ai_left_gt_list, ai_left_pred_list)
+    r2_left = r2_score(ai_left_gt_list, ai_left_pred_list)
+    plot_ai_angle_scatter(ai_left_gt_list, ai_left_pred_list, side='Left', save_path=os.path.join(result_dir, "scatter_left_ai_angle.png"))
 
-
+    # 右側
+    r_right, _ = pearsonr(ai_right_gt_list, ai_right_pred_list)
+    r2_right = r2_score(ai_right_gt_list, ai_right_pred_list)
+    plot_ai_angle_scatter(ai_right_gt_list, ai_right_pred_list, side='Right', save_path=os.path.join(result_dir, "scatter_right_ai_angle.png"))
+    
+    # 整體
+    ai_gt_list = np.concatenate([ai_left_gt_list, ai_right_gt_list])
+    ai_pred_list = np.concatenate([ai_left_pred_list, ai_right_pred_list])
+    r_all, _ = pearsonr(ai_gt_list, ai_pred_list)
+    r2_all = r2_score(ai_gt_list, ai_pred_list)
+    plot_ai_angle_scatter(ai_gt_list, ai_pred_list, side='Overall', save_path=os.path.join(result_dir, "scatter_overall_ai_angle.png"))
+    
+    print(f"Left AI angle correlation: r = {r_left:.2f}, r² = {r2_left:.2f}")
+    print(f"Right AI angle correlation: r = {r_right:.2f}, r² = {r2_right:.2f}")
+    print(f"Overall AI angle correlation: r = {r_all:.2f}, r² = {r2_all:.2f}")
+    
+    # 計算平均像素距離誤差與 AI 角度誤差的相關性
+    ai_errors_avg = [(l + r) / 2 for l, r in zip(ai_errors_left, ai_errors_right)]
+    plot_pixel_vs_angle_error(
+        pixel_errors=all_avg_distances,
+        ai_errors_avg = ai_errors_avg,
+        save_path=os.path.join(result_dir, "scatter_pixel_vs_angle_error.png")
+    )
+    r_pixel, _ = pearsonr(all_avg_distances, ai_errors_avg)
+    r2_pixel = r2_score(all_avg_distances, ai_errors_avg)
+    print(f"Pixel distance error vs AI angle error correlation: r = {r_pixel:.2f}, r² = {r2_pixel:.2f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
