@@ -9,6 +9,7 @@ from torchvision import models, transforms
 from torch import nn
 import pandas as pd
 import re
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
 
 IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 12
@@ -305,6 +306,49 @@ def draw_comparison_figure(
     fig.savefig(os.path.join(save_path, f"{os.path.splitext(image_file)[0]}_compare.png"), bbox_inches='tight')
     plt.close()
 
+
+
+# 修改後的 predict 函數片段 (整合 confusion matrix 統計)
+def compute_and_save_confusion_matrices_with_accuracy(left_preds, left_gts, right_preds, right_gts, save_dir):
+    labels = ['I', 'II', 'III', 'IV']
+
+    # 左側
+    cm_left = confusion_matrix(left_gts, left_preds, labels=labels)
+    acc_left = accuracy_score(left_gts, left_preds)
+    disp_left = ConfusionMatrixDisplay(confusion_matrix=cm_left, display_labels=labels)
+    fig_left, ax_left = plt.subplots(figsize=(6, 5))
+    disp_left.plot(ax=ax_left, cmap='Blues')
+    ax_left.set_title(f'Left IHDI Quadrant\nAccuracy: {acc_left:.2%}')
+    plt.tight_layout()
+    fig_left.savefig(os.path.join(save_dir, "confusion_matrix_left.png"))
+    plt.close(fig_left)
+
+    # 右側
+    cm_right = confusion_matrix(right_gts, right_preds, labels=labels)
+    acc_right = accuracy_score(right_gts, right_preds)
+    disp_right = ConfusionMatrixDisplay(confusion_matrix=cm_right, display_labels=labels)
+    fig_right, ax_right = plt.subplots(figsize=(6, 5))
+    disp_right.plot(ax=ax_right, cmap='Greens')
+    ax_right.set_title(f'Right IHDI Quadrant\nAccuracy: {acc_right:.2%}')
+    plt.tight_layout()
+    fig_right.savefig(os.path.join(save_dir, "confusion_matrix_right.png"))
+    plt.close(fig_right)
+
+    # 全部（合併左+右）
+    combined_preds = left_preds + right_preds
+    combined_gts = left_gts + right_gts
+    cm_all = confusion_matrix(combined_gts, combined_preds, labels=labels)
+    acc_all = accuracy_score(combined_gts, combined_preds)
+    disp_all = ConfusionMatrixDisplay(confusion_matrix=cm_all, display_labels=labels)
+    fig_all, ax_all = plt.subplots(figsize=(6, 5))
+    disp_all.plot(ax=ax_all, cmap='Purples')
+    ax_all.set_title(f'IHDI Quadrant (All)\nAccuracy: {acc_all:.2%}')
+    plt.tight_layout()
+    fig_all.savefig(os.path.join(save_dir, "confusion_matrix_all.png"))
+    plt.close(fig_all)
+
+    return acc_left, acc_right, acc_all
+
 def predict(model_name, model_path, data_dir, output_dir):
     # Extract training information from model path
     epochs, learning_rate, batch_size = extract_info_from_model_path(model_path)
@@ -345,6 +389,10 @@ def predict(model_name, model_path, data_dir, output_dir):
     image_counter = 1  # To keep track of the image index
     ai_errors_left = [] # To store AI angle errors (left)
     ai_errors_right = [] # To store AI angle errors (right)
+    left_preds_all = [] # To store left predicted keypoints
+    left_gts_all = [] # To store left ground truth keypoints
+    right_preds_all = [] # To store right predicted keypoints
+    right_gts_all = [] # To store right ground truth keypoints
 
 
     for image_file in os.listdir(os.path.join(data_dir, 'images')):
@@ -381,6 +429,11 @@ def predict(model_name, model_path, data_dir, output_dir):
             # Classify quadrants
             left_quadrants_pred, right_quadrants_pred = classify_quadrant_ihdi(scaled_keypoints)
             left_quadrants_gt, right_quadrants_gt = classify_quadrant_ihdi(original_keypoints)
+            
+            left_preds_all.append(left_quadrants_pred)
+            left_gts_all.append(left_quadrants_gt)
+            right_preds_all.append(right_quadrants_pred)
+            right_gts_all.append(right_quadrants_gt)
             
             # Determine the subdirectory based on avg_distance
             if avg_distance <= 7.5:
@@ -475,6 +528,18 @@ def predict(model_name, model_path, data_dir, output_dir):
     ai_error_chart_path = os.path.join(result_dir, f"{model_name}_AI_angle_errors.png")
     plt.savefig(ai_error_chart_path)
     plt.show()
+
+    acc_left, acc_right, acc_all = compute_and_save_confusion_matrices_with_accuracy(
+        left_preds=left_preds_all,
+        left_gts=left_gts_all,
+        right_preds=right_preds_all,
+        right_gts=right_gts_all,
+        save_dir=result_dir
+    )
+
+    print(f"Left quadrant accuracy: {acc_left:.2%}")
+    print(f"Right quadrant accuracy: {acc_right:.2%}")
+    print(f"Overall quadrant accuracy: {acc_all:.2%}")
 
 
 
