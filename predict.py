@@ -10,7 +10,7 @@ from torch import nn
 import pandas as pd
 import re
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, spearmanr, kendalltau
 
 IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 12
@@ -348,11 +348,6 @@ def compute_and_save_confusion_matrices_with_accuracy(left_preds, left_gts, righ
 
     return acc_left, acc_right, acc_all
 
-import numpy as np
-from sklearn.metrics import r2_score
-from scipy.stats import pearsonr
-import matplotlib.pyplot as plt
-
 def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     x = np.array(gt_list)
     y = np.array(pred_list)
@@ -363,7 +358,9 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     y_line = a * x_line + b
 
     # 評估指標
-    r, _ = pearsonr(x, y)
+    pearsonr_corr, _ = pearsonr(x, y)
+    spearmanr_corr, _ = spearmanr(x, y)
+    kendalltau_corr, _ = kendalltau(x, y)
     r2 = r2_score(x, y)
 
     # 繪圖
@@ -376,7 +373,7 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     # 畫回歸線
     plt.plot(x_line, y_line, 'r--', label=f'Regression Line: y = {a:.2f}x + {b:.2f}')
 
-    plt.title(f"{side} AI Angle Prediction\nr = {r:.2f}, R² = {r2:.2f}")
+    plt.title(f"{side} AI Angle Prediction\npearson r = {pearsonr_corr:.2f}, spearman r = {spearmanr_corr:.2f}, kendall tau = {kendalltau_corr:.2f}, R² = {r2:.2f}")
     plt.xlabel("Ground Truth AI Angle (°)")
     plt.ylabel("Predicted AI Angle (°)")
     plt.legend()
