@@ -1,10 +1,8 @@
 import os
 import cv2
-import pandas as pd
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog, QComboBox, QLabel, QDialog, QMessageBox
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QImage
-import numpy as np
 import re
 import json
 
@@ -115,9 +113,8 @@ class KeypointAnnotationApp(QWidget):
 
             # ----------------------
             # 畫 Hip 物件框
-            json_file = os.path.join('detections_json', f"{image_name}.json")
+            json_file = os.path.join('detections', f"{image_name}.json")
             if os.path.exists(json_file):
-                import json
                 with open(json_file, "r") as f:
                     data = json.load(f)
 
@@ -224,9 +221,8 @@ class KeypointAnnotationApp(QWidget):
 
         # ------------------------
         # 繪製Hip物件框
-        json_file = os.path.join('detections_json', f"{image_name}.json")
+        json_file = os.path.join('detections', f"{image_name}.json")
         if os.path.exists(json_file):
-            import json
             with open(json_file, "r") as f:
                 data = json.load(f)
 
@@ -307,11 +303,11 @@ class KeypointAnnotationApp(QWidget):
         self.detect_window.show()
     
     def save_object_detections(self, keypoints):
-        if not os.path.exists('detections_json'):
-            os.makedirs('detections_json')
+        if not os.path.exists('detections'):
+            os.makedirs('detections')
 
         image_name = os.path.basename(self.image_files[self.current_image_idx])
-        json_file = os.path.join('detections_json', f"{os.path.splitext(image_name)[0]}.json")
+        json_file = os.path.join('detections', f"{os.path.splitext(image_name)[0]}.json")
 
         if len(keypoints) < 4:
             self.show_message("警告", "必須標註四個點才能儲存物件偵測結果")
