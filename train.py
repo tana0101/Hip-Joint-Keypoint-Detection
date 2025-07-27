@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
+from model import initialize_model
 
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
@@ -113,30 +114,6 @@ class AugmentedKeypointDataset(Dataset):
 
         return translated_image, torch.tensor(keypoints_translated, dtype=torch.float32), (original_width, original_height)
 
-# Initialize model
-def initialize_model(model_name):
-    if model_name == "efficientnet":
-        model = models.efficientnet_v2_m(pretrained=True)
-        in_features = model.classifier[1].in_features
-        model.classifier = nn.Sequential(
-            nn.Dropout(p=0.3),
-            nn.Linear(in_features, POINTS_COUNT * 2)
-        )
-    elif model_name == "resnet":
-        model = models.resnet50(pretrained=True)
-        model.fc = nn.Sequential(
-            nn.Linear(model.fc.in_features, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, POINTS_COUNT * 2)
-        )
-    elif model_name == "vgg":
-        model = models.vgg19(pretrained=True)
-        model.classifier[6] = nn.Linear(model.classifier[6].in_features, POINTS_COUNT * 2)
-    else:
-        raise ValueError("Model must be 'efficientnet', 'resnet', or 'vgg'.")
-    
-    return model
-
 def calculate_nme(preds, targets, img_size):
     """
     Calculate the Normalized Mean Error (NME) for a single sample.
@@ -163,7 +140,6 @@ def calculate_nme(preds, targets, img_size):
 
     # Return the mean of the normalized distances
     return np.mean(norm_distances)
-
 
 def calculate_pixel_error(preds, targets, img_size):
     """
@@ -219,7 +195,6 @@ def display_image(dataset, index):
         plt.text(x, y, f'{i//2 + 1}', color='yellow', fontsize=12)  # Add number next to each point
 
     plt.show()
-
 
 def extend_with_center_points(outputs, keypoints):
     # Reshape outputs and keypoints for easier indexing
@@ -363,7 +338,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
     
     # Initialize the model, loss function, and optimizer
-    model = initialize_model(model_name)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = initialize_model(model_name, POINTS_COUNT).to(device)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -375,9 +351,6 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     val_losses = []
     val_nmes = []
     val_pixel_errors = []
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
     best_val_loss = float('inf')  # Track the best validation loss
     best_model_state = None  # Variable to store the best model
