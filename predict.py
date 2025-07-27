@@ -20,9 +20,7 @@ def initialize_model(model_name):
     if model_name == "efficientnet":
         model = models.efficientnet_v2_m(pretrained=True)
         model.classifier = nn.Sequential(
-            nn.Linear(model.classifier[1].in_features, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, POINTS_COUNT * 2)
+            nn.Linear(model.classifier[1].in_features, POINTS_COUNT * 2)
         )
     elif model_name == "resnet":
         model = models.resnet50(pretrained=True)
