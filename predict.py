@@ -11,31 +11,10 @@ import pandas as pd
 import re
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score
 from scipy.stats import pearsonr, spearmanr, kendalltau
+from model import initialize_model
 
 IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 12
-
-# Initialize model
-def initialize_model(model_name):
-    if model_name == "efficientnet":
-        model = models.efficientnet_v2_m(pretrained=True)
-        model.classifier = nn.Sequential(
-            nn.Linear(model.classifier[1].in_features, POINTS_COUNT * 2)
-        )
-    elif model_name == "resnet":
-        model = models.resnet50(pretrained=True)
-        model.fc = nn.Sequential(
-            nn.Linear(model.fc.in_features, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, POINTS_COUNT * 2)
-        )
-    elif model_name == "vgg":
-        model = models.vgg19(pretrained=True)
-        model.classifier[6] = nn.Linear(model.classifier[6].in_features, 16)
-    else:
-        raise ValueError("'efficientnet', 'resnet', or 'vgg'.")
-    
-    return model
 
 def load_annotations(annotation_path):
     keypoints = pd.read_csv(annotation_path, header=None).values.flatten()
@@ -383,7 +362,6 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     else:
         plt.show()
 
-
 def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
     # 確保是 np.array
     x = np.array(pixel_errors)
@@ -420,7 +398,7 @@ def predict(model_name, model_path, data_dir, output_dir):
     # Extract training information from model path
     epochs, learning_rate, batch_size = extract_info_from_model_path(model_path)
     
-    model = initialize_model(model_name)
+    model = initialize_model(model_name, POINTS_COUNT)
     model.load_state_dict(torch.load(model_path))
     model.eval()
 
