@@ -311,17 +311,17 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     combined_dataset = ConcatDataset([train_dataset, augmented_dataset])
     combined_dataset = ConcatDataset([combined_dataset, augmented_dataset2])
     
-    # To visualize the dataset
-    display_image(train_dataset, 0)
-    for i in range(0, 3):
-        display_image(augmented_dataset, i)
-        display_image(augmented_dataset2, i)
+    # # To visualize the dataset
+    # display_image(train_dataset, 0)
+    # for i in range(0, 3):
+    #     display_image(augmented_dataset, i)
+    #     display_image(augmented_dataset2, i)
     
     train_loader = DataLoader(
         combined_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
+        num_workers=2,
         pin_memory=True,
         prefetch_factor=4
     )
@@ -374,6 +374,9 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
             # Calculate loss using the extended tensors
             loss = criterion(outputs_extended, keypoints_extended)
             loss.backward()
+            
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
 
             running_loss += loss.item()
@@ -463,7 +466,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
             best_model_state = model.state_dict()  # Save the model state at the best point
             print(f"Validation loss improved, saving model.")
             
-        if epoch + 1 == 1000:
+        if epoch + 1 == 500:
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= 0.1
             print(f"[Epoch {epoch+1}] Learning rate manually reduced.")
