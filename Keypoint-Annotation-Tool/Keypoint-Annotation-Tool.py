@@ -87,7 +87,7 @@ class KeypointAnnotationApp(QWidget):
             h, w, c = image.shape
 
             # 縮放圖片至1/10
-            new_h, new_w = int(h / 10), int(w / 10)
+            new_h, new_w = int(h / 5), int(w / 5)
             image_resized = cv2.resize(image, (new_w, new_h))
 
             # 獲取當前圖片名稱
