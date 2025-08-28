@@ -338,8 +338,10 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size):
     print(f"Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
     
     # Initialize the model, loss function, and optimizer
+    model = initialize_model(model_name, POINTS_COUNT)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = initialize_model(model_name, POINTS_COUNT).to(device)
+    model.to(device)
+    
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
