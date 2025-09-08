@@ -1,0 +1,1 @@
+使用 efficientnet 做特徵提取後，以最後三層(6,7,8)與四層(4,5,6,7)，透過不同的融合方式(GAPConcat, GatedFusion)接上 transformer 或 CMAM 進行關鍵點檢測的模型。

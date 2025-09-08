@@ -1,0 +1,1 @@
+使用 convnext 接上 transformer 或 CMAM 進行關鍵點檢測的模型。
