@@ -131,7 +131,7 @@ class PatchTransformer(nn.Module):
         x = x.mean(dim=1)                 # mean pooling over tokens → [B, hidden]
         return x
 
-class EfficientNetMultiScaleTransformer(nn.Module):
+class EfficientNetMultiScaleTransformer_4scales_GAPConcat(nn.Module):
     """
     Multi-Scale (last 4 MBConv) + Transformer per scale
     融合方式：Mean Pooling + Concat
@@ -201,9 +201,9 @@ class EfficientNetMultiScaleTransformer(nn.Module):
         out = self.head(fused)                      # [B, num_points*2]
         return out
 
-class EfficientNetMultiScaleTransformer_3scales_original(nn.Module):
+class EfficientNetMultiScaleTransformer_3scales_GAPConcat(nn.Module):
     """
-    Multi-Scale (last 4 MBConv) + Transformer per scale
+    Multi-Scale (last 3 MBConv) + Transformer per scale
     融合方式：Mean Pooling + Concat
     """
     def __init__(self, num_points: int, image_size: int = 224,
@@ -216,11 +216,11 @@ class EfficientNetMultiScaleTransformer_3scales_original(nn.Module):
         # 1: seq (24,112x112)
         # 2: seq (48,56x56)
         # 3: seq (80,28x28)
-        # 4: seq (160,14x14)  ← MBConv block A
-        # 5: seq (176,14x14)  ← MBConv block B
-        # 6: seq (304, 7x7)   ← MBConv block C
-        # 7: seq (512, 7x7)   ← MBConv block D
-        # 8: Conv2dNormActivation (1280, 7x7)
+        # 4: seq (160,14x14)  
+        # 5: seq (176,14x14)
+        # 6: seq (304, 7x7)   ← MBConv block A
+        # 7: seq (512, 7x7)   ← MBConv block B
+        # 8: Conv2dNormActivation (1280, 7x7) ← MBConv block C
 
         # 前導部分（跑到 block4 之前）
         self.stem_to_5 = nn.Sequential(*feats[:6]) # 到 176, 14x14
@@ -312,7 +312,7 @@ class EfficientNetWithCBAM(nn.Module):
         x = x.view(x.size(0), -1)
         return self.head(x)
 
-class EfficientNetMultiScaleCBAM(nn.Module):
+class EfficientNetMultiScaleCBAM_4scales_GAPConcat(nn.Module):
     """
     使用 EfficientNetV2-M 最後四個 MBConv 輸出 (C=160,176,304,512)，
     各自經過 CBAM 後做 Global Average Pooling，再 concat 成一個向量，
@@ -370,7 +370,7 @@ class EfficientNetMultiScaleCBAM(nn.Module):
         out = self.head(fused)                      # [B, num_points*2]
         return out
 
-class EfficientNetMultiScaleCBAM_3scales_original(nn.Module):
+class EfficientNetMultiScaleCBAM_3scales_GAPConcat(nn.Module):
     """
     使用 EfficientNetV2-M 最後四個 MBConv 輸出 (C=160,176,304,512)，
     各自經過 CBAM 後做 Global Average Pooling，再 concat 成一個向量，
@@ -444,7 +444,7 @@ class ScaleHead(nn.Module):
         y = self.ln(y)                         # 穩定不同尺度的統計
         return y
 
-class EfficientNetMultiScaleCBAM_3scales(nn.Module):
+class EfficientNetMultiScaleCBAM_3scales_GatedFusion(nn.Module):
     def __init__(self, num_points: int, embed_dim: int = 128):
         super().__init__()
         base  = models.efficientnet_v2_m(pretrained=True)
@@ -589,7 +589,7 @@ class MSDecoder(nn.Module):
         out = self.dec(tgt=q, memory=mem)
         return out
 
-class EfficientNetMSCrossAttn3Scales(nn.Module):
+class EfficientNetMultiScale_3scales_CrossAttn(nn.Module):
     def __init__(self, num_points: int, hidden: int = 256, nhead: int = 4, nlayers: int = 1):
         super().__init__()
         base  = models.efficientnet_v2_m(pretrained=True)
@@ -652,6 +652,47 @@ class EfficientNet_FC2048(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+class ConvNeXtWithCBAM(nn.Module):
+    """
+    ConvNeXt-Small backbone，最後一個 stage 輸出 [B, 768, H/32, W/32]
+    -> 接 CBAM
+    -> GAP (1x1)
+    -> LayerNorm2d（沿用官方）
+    -> Flatten + Linear(num_points*2)
+    """
+    def __init__(self, num_points: int, pretrained: bool = True):
+        super().__init__()
+        base = models.convnext_small(pretrained=pretrained)
+
+        self.backbone = base.features                     # 到最後 stage 輸出 C=768
+        self.cbam = CBAM(in_channels=768)                 # 接在最後 stage 之後
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))          # [B, 768, 1, 1]
+
+        # 直接沿用官方 classifier 的 LayerNorm2d 作為歸一化
+        self.norm = base.classifier[0]                    # LayerNorm2d(768, eps=1e-6)
+        self.flatten = nn.Flatten(1)
+        self.head = nn.Linear(768, num_points * 2)
+
+    def forward(self, x):
+        x = self.backbone(x)      # [B, 768, h, w]
+        x = self.cbam(x)          # CBAM 強化
+        x = self.pool(x)          # [B, 768, 1, 1]
+        x = self.norm(x)          # LayerNorm2d
+        x = self.flatten(x)       # [B, 768]
+        x = self.head(x)          # [B, 2*num_points]
+        return x
+
+class ConvNeXt(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = models.convnext_small(pretrained=True)
+        in_features = model.classifier[2].in_features  # ConvNeXt classifier: [LayerNorm2d, Flatten, Linear]
+        model.classifier[2] = nn.Linear(in_features, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
+
 class ResNet50(nn.Module):
     def __init__(self, num_points):
         super().__init__()
@@ -685,22 +726,26 @@ def initialize_model(model_name, num_points):
         return EfficientNetWithTransformer(num_points)
     elif model_name == "efficientnet_mid_transformer":
         return EfficientNetMidWithTransformer(num_points)
-    elif model_name == "efficientnet_ms_transformer":
-        return EfficientNetMultiScaleTransformer(num_points)
-    elif model_name == "efficientnet_ms_transformer_3scales_original":
-        return EfficientNetMultiScaleTransformer_3scales_original(num_points)
+    elif model_name == "efficientnet_ms_transformer_4scales_gapconcat":
+        return EfficientNetMultiScaleTransformer_4scales_GAPConcat(num_points)
+    elif model_name == "efficientnet_ms_transformer_3scales_gapconcat":
+        return EfficientNetMultiScaleTransformer_3scales_GAPConcat(num_points)
     elif model_name == "efficientnet_cbam":
         return EfficientNetWithCBAM(num_points)
-    elif model_name == "efficientnet_ms_cbam":
-        return EfficientNetMultiScaleCBAM(num_points)
+    elif model_name == "efficientnet_ms_cbam_4scales_gapconcat":
+        return EfficientNetMultiScaleCBAM_4scales_GAPConcat(num_points)
     elif model_name == "efficientnet_cbam_transformer":
         return EfficientNetCBAMTransformer(num_points)
-    elif model_name == "efficientnet_ms_cbam_3scales":
-        return EfficientNetMultiScaleCBAM_3scales(num_points)
-    elif model_name == "efficientnet_ms_cbam_3scales_original":
-        return EfficientNetMultiScaleCBAM_3scales_original(num_points)
-    elif model_name == "efficientnet_ms_cross_attn_3scales":
-        return EfficientNetMSCrossAttn3Scales(num_points)
+    elif model_name == "efficientnet_ms_cbam_3scales_gated":
+        return EfficientNetMultiScaleCBAM_3scales_GatedFusion(num_points)
+    elif model_name == "efficientnet_ms_cbam_3scales_gapconcat":
+        return EfficientNetMultiScaleCBAM_3scales_GAPConcat(num_points)
+    elif model_name == "efficientnet_ms_3scales_cross_attn":
+        return EfficientNetMultiScale_3scales_CrossAttn(num_points)
+    elif model_name == "convnext":
+        return ConvNeXt(num_points)
+    elif model_name == "convnext_cbam":
+        return ConvNeXtWithCBAM(num_points)
     elif model_name == "resnet":
         return ResNet50(num_points)
     elif model_name == "vgg":
