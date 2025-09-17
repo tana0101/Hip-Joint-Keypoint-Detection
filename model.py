@@ -682,6 +682,63 @@ class ConvNeXtWithCBAM(nn.Module):
         x = self.head(x)          # [B, 2*num_points]
         return x
 
+class ConvNeXtWithTransformer(nn.Module):
+    def __init__(self, num_points: int,
+                 image_size: int = 224,
+                 hidden_dim: int = 256,
+                 num_heads: int = 4,
+                 num_layers: int = 1,
+                 pretrained: bool = True):
+        super().__init__()
+
+        # 1. ConvNeXt Small Backbone
+        base = models.convnext_small(pretrained=pretrained)
+        self.backbone = base.features  # [B, 768, H/32, W/32]
+        self.input_dim = 768
+
+        # 2. Fix output size to 7x7 like EfficientNet
+        self.pool = nn.AdaptiveAvgPool2d((7, 7))  # [B, 768, 7, 7]
+        self.seq_len = 7 * 7
+
+        # 3. Project to hidden dim
+        self.projector = nn.Linear(self.input_dim, hidden_dim)
+
+        # 4. Positional encoding
+        self.positional_encoding = nn.Parameter(
+            torch.randn(1, self.seq_len, hidden_dim) * 0.01
+        )
+
+        # 5. Normalize before Transformer
+        self.pre_norm = nn.LayerNorm(hidden_dim)
+
+        # 6. Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=num_heads,
+            dim_feedforward=hidden_dim * 4,
+            activation='gelu',
+            batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # 7. Output regression head
+        self.output_head = nn.Sequential(
+            nn.Flatten(),
+            nn.LayerNorm(hidden_dim * self.seq_len),
+            nn.Linear(hidden_dim * self.seq_len, num_points * 2)
+        )
+
+    def forward(self, x):
+        x = self.backbone(x)                # [B, 768, H/32, W/32]
+        x = self.pool(x)                    # [B, 768, 7, 7]
+        x = x.flatten(2).transpose(1, 2)    # [B, 49, 768]
+        x = self.projector(x)               # [B, 49, hidden_dim]
+        x = self.pre_norm(x)
+        x = x + self.positional_encoding    # [B, 49, hidden_dim]
+        x = self.transformer(x)             # [B, 49, hidden_dim]
+        out = self.output_head(x)           # [B, 2*num_points]
+        return out
+
 class ConvNeXt(nn.Module):
     def __init__(self, num_points):
         super().__init__()
@@ -746,6 +803,8 @@ def initialize_model(model_name, num_points):
         return ConvNeXt(num_points)
     elif model_name == "convnext_cbam":
         return ConvNeXtWithCBAM(num_points)
+    elif model_name == "convnext_transformer":
+        return ConvNeXtWithTransformer(num_points)
     elif model_name == "resnet":
         return ResNet50(num_points)
     elif model_name == "vgg":
