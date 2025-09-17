@@ -82,7 +82,12 @@ class KeypointAnnotationApp(QWidget):
         self.prev_button = QPushButton("上一張")
         self.prev_button.clicked.connect(self.prev_image)
         layout.addWidget(self.prev_button)
-
+        
+        # 到未標註影像的按鈕
+        self.jump_button = QPushButton("跳到下一張未標註")
+        self.jump_button.clicked.connect(self.jump_to_first_unlabeled)
+        layout.addWidget(self.jump_button)
+        
         # 清除按鈕
         self.clear_button = QPushButton("清除標記")
         self.clear_button.clicked.connect(self.clear_annotations)
@@ -188,7 +193,6 @@ class KeypointAnnotationApp(QWidget):
             pixmap = QPixmap.fromImage(qimage)
             self.image_label.setPixmap(pixmap)
 
-
     def next_image(self):
         if self.current_image_idx < len(self.image_files) - 1:
             self.current_image_idx += 1
@@ -204,6 +208,78 @@ class KeypointAnnotationApp(QWidget):
             self.display_image(self.current_image_idx)
         else:
             self.show_message("提示", "已經是第一張圖片了")
+            
+    def _image_basename(self, image_path):
+        return os.path.splitext(os.path.basename(image_path))[0]
+
+    # --- 檢查標註狀態的輔助函數 --- 
+    def _has_keypoints(self, image_path):
+        """
+        視為「有關鍵點」的條件：
+        - annotations/{name}.csv 存在，且裡面有12組 (x, y) 點
+        """
+        name = self._image_basename(image_path)
+        csv_file = os.path.join('annotations', f"{name}.csv")
+        if not os.path.exists(csv_file):
+            return False
+        try:
+            with open(csv_file, "r") as f:
+                line = f.readline().strip()
+            # 匹配到12組 "(x, y)"
+            matches = re.findall(r"\((\d+),\s*(\d+)\)", line)
+            return len(matches) == 12
+        except Exception:
+            return False
+    
+    def _has_detections(self, image_path):
+        """
+        視為「有物件標註」的條件：
+        - detections/{name}.json 存在，且包含 LeftHip, RightHip，
+          每個 label 都有兩個點（左上、右下）
+        """
+        name = self._image_basename(image_path)
+        json_file = os.path.join('detections', f"{name}.json")
+        if not os.path.exists(json_file):
+            return False
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
+            objs = data.get("objects", [])
+            got_left = any(o.get("label") == "LeftHip" and len(o.get("points", [])) == 2 for o in objs)
+            got_right = any(o.get("label") == "RightHip" and len(o.get("points", [])) == 2 for o in objs)
+            return got_left and got_right
+        except Exception:
+            return False
+    # ------------------------------
+    
+    # 跳轉到第一張未完成的圖片
+    def jump_to_first_unlabeled(self):
+        if not self.image_files:
+            self.show_message("提示", "尚未載入資料夾")
+            return
+
+        # 先找「第一張沒有 keypoints 的」
+        target_idx = None
+        for idx, img_path in enumerate(self.image_files):
+            if not self._has_keypoints(img_path):
+                target_idx = idx
+                break
+
+        # 如果 keypoints 都有了，再找「第一張沒有 detections 的」
+        if target_idx is None:
+            for idx, img_path in enumerate(self.image_files):
+                if not self._has_detections(img_path):
+                    target_idx = idx
+                    break
+
+        # 根據結果跳轉或提示
+        if target_idx is not None:
+            self.current_image_idx = target_idx
+            self.image_selector.setCurrentIndex(target_idx)  # 這會觸發 on_image_selected -> display_image
+            # 額外提示（可選）
+            # self.show_message("提示", f"移動到第 {target_idx+1} 張：{os.path.basename(self.image_files[target_idx])}")
+        else:
+            self.show_message("恭喜", "所有圖片皆已完成關鍵點與物件標註 🎉")
 
     def clear_annotations(self):
         """清除當前圖片的標注並刪除CSV檔案"""
