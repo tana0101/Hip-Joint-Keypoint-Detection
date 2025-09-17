@@ -1,10 +1,54 @@
 import os
 import cv2
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog, QComboBox, QLabel, QDialog, QMessageBox
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
 import re
 import json
+
+class CrosshairLabel(QLabel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setMouseTracking(True)         # 沒按鍵也能收到 mouse move
+        self._cursor_pos = QPoint(-1, -1)   # 初始不顯示
+        self.crosshair_enabled = True       # 若要加切換，可暴露成屬性
+
+    def mouseMoveEvent(self, event):
+        self._cursor_pos = event.pos()
+        self.update()                       # 觸發重繪
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._cursor_pos = QPoint(-1, -1)   # 滑出視窗就隱藏
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        # 先讓 QLabel 把底圖(pixmap)畫好
+        super().paintEvent(event)
+
+        if not self.crosshair_enabled:
+            return
+
+        x, y = self._cursor_pos.x(), self._cursor_pos.y()
+        if x < 0 or y < 0:
+            return
+
+        # 疊加畫十字線
+        p = QPainter(self)
+        pen = QPen(Qt.green)                # 可改顏色；若想半透明可用 QColor(r,g,b,a)
+        pen.setWidth(1)
+        p.setPen(pen)
+
+        # 垂直線
+        p.drawLine(x, 0, x, self.height())
+        # 水平線
+        p.drawLine(0, y, self.width(), y)
+
+        # （可選）角落顯示座標
+        # p.drawText(10, 20, f"({x},{y})")
+
+        p.end()
 
 class KeypointAnnotationApp(QWidget):
     def __init__(self):
@@ -455,7 +499,7 @@ class ObjectDetectionWindow(QWidget):
         self.h, self.w, self.c = self.image.shape
         self.image_copy = self.image.copy()
 
-        self.canvas = QLabel(self)
+        self.canvas = CrosshairLabel(self)
         self.canvas.setGeometry(0, 0, self.w, self.h)
         self.update_image()
 
