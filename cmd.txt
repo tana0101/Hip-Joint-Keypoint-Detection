@@ -4,7 +4,7 @@ python3 predict.py --model_name "convnext_large" --model_path "models/convnext_l
 python3 kfold_train.py --data_dir dataset/xray_IHDI_4/ --model_name "efficientnet" --epochs 1000 --learning_rate 0.01 --batch_size 32 --k_folds 3
 python3 kfold_predict.py --models_dir models --model_name "efficientnet" --val_data_dir dataset/xray_IHDI_4/ --output_dir "results/folds/02" --k_folds 3
 
-python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --epochs 750 --learning_rate 0.0001 --batch_size 32 --side left
+python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --epochs 750 --learning_rate 0.0001 --batch_size 32 --side left --mirror
 python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_750_0.0001_32_best.pth --kp_right_path models/convnext_cropright_750_0.0001_32_best.pth --yolo_weights models/yolo11s.pt --data "data/test" --output_dir "results"
 
 resnet
