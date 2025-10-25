@@ -749,6 +749,39 @@ class ConvNeXt(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+    
+class ConvNeXtTiny(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = models.convnext_tiny(pretrained=True)
+        in_features = model.classifier[2].in_features  # ConvNeXt classifier: [LayerNorm2d, Flatten, Linear]
+        model.classifier[2] = nn.Linear(in_features, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)    
+
+class ConvNeXtBase(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = models.convnext_base(pretrained=True)
+        in_features = model.classifier[2].in_features  # ConvNeXt classifier: [LayerNorm2d, Flatten, Linear]
+        model.classifier[2] = nn.Linear(in_features, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
+
+class ConvNeXtLarge(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = models.convnext_large(pretrained=True)
+        in_features = model.classifier[2].in_features  # ConvNeXt classifier: [LayerNorm2d, Flatten, Linear]
+        model.classifier[2] = nn.Linear(in_features, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
 
 class ResNet50(nn.Module):
     def __init__(self, num_points):
@@ -799,8 +832,14 @@ def initialize_model(model_name, num_points):
         return EfficientNetMultiScaleCBAM_3scales_GAPConcat(num_points)
     elif model_name == "efficientnet_ms_3scales_cross_attn":
         return EfficientNetMultiScale_3scales_CrossAttn(num_points)
+    elif model_name == "convnext_tiny":
+        return ConvNeXtTiny(num_points)
     elif model_name == "convnext":
         return ConvNeXt(num_points)
+    elif model_name == "convnext_base":
+        return ConvNeXtBase(num_points)
+    elif model_name == "convnext_large":
+        return ConvNeXtLarge(num_points)
     elif model_name == "convnext_cbam":
         return ConvNeXtWithCBAM(num_points)
     elif model_name == "convnext_transformer":
