@@ -459,17 +459,17 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
     augmented_dataset2 = AugmentedKeypointDataset(train_dataset, max_angle=10)
     combined_dataset = ConcatDataset([train_dataset, augmented_dataset, augmented_dataset2])
     
-    # To visualize the dataset
-    display_image(train_dataset, 0)
-    display_image(mirrored_dataset, 0)
-    for i in range(0, 3):
-        display_image(augmented_dataset, i)
-        display_image(augmented_dataset2, i)
+    # # To visualize the dataset
+    # display_image(train_dataset, 0)
+    # display_image(mirrored_dataset, 0)
+    # for i in range(0, 3):
+    #     display_image(augmented_dataset, i)
+    #     display_image(augmented_dataset2, i)
     
     train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True,
-                                num_workers=2, pin_memory=True, prefetch_factor=4)
+                                num_workers=12, pin_memory=True, prefetch_factor=4)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                                num_workers=2, pin_memory=True, prefetch_factor=4)
+                                num_workers=12, pin_memory=True, prefetch_factor=4)
 
     print(f"[{side.upper()}] Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
     

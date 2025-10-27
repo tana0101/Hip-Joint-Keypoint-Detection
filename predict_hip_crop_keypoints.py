@@ -16,7 +16,9 @@ from ultralytics import YOLO
 
 IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 6
+REORDER_6 = [2, 1, 0, 5, 4, 3]  # 單側6點在左右鏡像後的索引重排（3點一組反轉）
 
+# Detection bbox 
 def _square_expand_clip(x1, y1, x2, y2, W, H, expand=0.10, keep_square=True):
     """把 bbox 變成(可選)正方形並外擴，再裁到影像邊界內。"""
     bw, bh = x2 - x1, y2 - y1
@@ -60,6 +62,62 @@ def _infer_side_kp(kp_model, pil_crop, transform, crop_box):
     pred_orig[:, 1] = pred[:, 1] * sy + y1
     return pred_orig  # (6,2)
 
+# 使用鏡像模型預測函式
+def _hflip_kpts_224(kpts_6x2):
+    """在 224x224 空間水平鏡像單側6點（numpy, shape=(6,2)）"""
+    out = kpts_6x2.copy()
+    out[:, 0] = (IMAGE_SIZE - 1) - out[:, 0]
+    return out
+
+def _reorder_between_sides(kpts_6x2, from_side, to_side):
+    """左↔右的單側6點索引重排；同側不動，跨側用 REORDER_6。"""
+    if from_side == to_side:
+        return kpts_6x2
+    return kpts_6x2[REORDER_6, :]
+
+def _infer_side_kp(kp_model, pil_crop, transform, crop_box):
+    """裁切→前處理→推論→反投影回原圖座標。回傳 (6,2) numpy（該模型的“側別順序”）。"""
+    x1, y1, x2, y2 = crop_box
+    crop_w, crop_h = (x2 - x1), (y2 - y1)
+    crop_tensor = transform(pil_crop).unsqueeze(0)
+    with torch.no_grad():
+        pred_224 = kp_model(crop_tensor).cpu().numpy().reshape(-1, 2)  # (6,2)
+    sx, sy = crop_w / IMAGE_SIZE, crop_h / IMAGE_SIZE
+    pred_orig = np.empty_like(pred_224)
+    pred_orig[:, 0] = pred_224[:, 0] * sx + x1
+    pred_orig[:, 1] = pred_224[:, 1] * sy + y1
+    return pred_orig
+
+def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, target_side):
+    """
+    單模型模式：把 'target_side' 的裁切圖鏡像成 'model_side' 外觀 → 用該模型推論 →
+    在 224 空間反鏡像回來 → 做 from=model_side → to=target_side 的索引重排 → 反投影回原圖。
+    回傳 (6,2) numpy（target_side 的順序）。
+    """
+    # 1) 目標側裁切 → 鏡像成模型側外觀
+    pil_mirror = ImageOps.mirror(pil_crop_src)  # 水平鏡像
+
+    # 2) 模型在鏡像空間推論（得到 model_side 順序，座標=224）
+    crop_tensor = transform(pil_mirror).unsqueeze(0)
+    with torch.no_grad():
+        pred_model_224 = kp_model(crop_tensor).cpu().numpy().reshape(-1, 2)
+
+    # 3) 224 空間反鏡像回未鏡像空間
+    pred_unflipped_224 = _hflip_kpts_224(pred_model_224)
+
+    # 4) 索引重排：model_side → target_side
+    pred_target_224 = _reorder_between_sides(pred_unflipped_224, from_side=model_side, to_side=target_side)
+
+    # 5) 反投影回原圖
+    x1, y1, x2, y2 = crop_box
+    crop_w, crop_h = (x2 - x1), (y2 - y1)
+    sx, sy = crop_w / IMAGE_SIZE, crop_h / IMAGE_SIZE
+    pred_target_orig = np.empty_like(pred_target_224)
+    pred_target_orig[:, 0] = pred_target_224[:, 0] * sx + x1
+    pred_target_orig[:, 1] = pred_target_224[:, 1] * sy + y1
+    return pred_target_orig
+
+# Load annotations from CSV file
 def load_annotations(annotation_path):
     keypoints = pd.read_csv(annotation_path, header=None).values.flatten()
     keypoints = [float(coord) for point in keypoints for coord in point.strip('"()').split(",")]
@@ -438,23 +496,63 @@ def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
     else:
         plt.show()
 
+# ---------- helpers for sigma guides ----------
+def add_sigma_guides(ax, mu, std, one_sigma_alpha=0.10, line_alpha=0.35, mu_label=None, label=None, mu_color='red', color='blue'):
+    """
+    在圖上加上 μ±1σ 淡色區間、以及 μ、μ±1σ、μ±2σ 參考線。
+    """
+    ymin, ymax = ax.get_ylim()
+
+    # ±1σ淡色區間
+    ax.axhspan(mu - std, mu + std, alpha=one_sigma_alpha, color=color)
+
+    # μ與σ參考線
+    ax.axhline(mu, linestyle='--', linewidth=1.5, label=mu_label, color=mu_color)
+    for k in (1, 2):
+        ax.axhline(mu + k*std, linestyle=':', alpha=line_alpha, linewidth=1.2, 
+                   color=color, label=label if k == 1 else None)
+        ax.axhline(mu - k*std, linestyle=':', alpha=line_alpha, linewidth=1.2, 
+                   color=color)
+
+    # 保持原本y範圍（避免被新元素改動）
+    ax.set_ylim(ymin, ymax)
+
+def add_zscore_right_axis(ax, mu, std):
+    """
+    增加右側z-score座標軸，刻度在 -2, -1, 0, 1, 2。
+    """
+    ax2 = ax.twinx()
+    y0, y1 = ax.get_ylim()
+    ax2.set_ylim((y0 - mu) / std, (y1 - mu) / std)
+    ax2.set_ylabel('Standardized difference (σ)')
+    ax2.set_yticks([-2, -1, 0, 1, 2])
+    return ax2
+    
 def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir):
-    # Extract training information from model path
-    epochs, learning_rate, batch_size = extract_info_from_model_path(kp_left_path) # Assuming both models have same training params
-
-    # 1) 載入 YOLO + 左右 KP 模型
+    
+    # 1) 載入 YOLO + KP 模型（左右可能有其一缺省）
     yolo_model = YOLO(yolo_weights)
-
-    kp_left = initialize_model(model_name, POINTS_COUNT)   # 6點*2 = 12維
-    kp_left.load_state_dict(torch.load(kp_left_path, map_location="cpu"))
-    kp_left.eval()
-
-    kp_right = initialize_model(model_name, POINTS_COUNT)
-    kp_right.load_state_dict(torch.load(kp_right_path, map_location="cpu"))
-    kp_right.eval()
+    
+    use_left  = (kp_left_path  is not None) and (str(kp_left_path).strip()  != "")
+    use_right = (kp_right_path is not None) and (str(kp_right_path).strip() != "")
+    assert use_left or use_right, "至少提供 --kp_left_path 或 --kp_right_path 其中之一"
+    
+    kp_left = kp_right = None
+    if use_left:
+        kp_left = initialize_model(model_name, POINTS_COUNT)
+        kp_left.load_state_dict(torch.load(kp_left_path, map_location="cpu"))
+        kp_left.eval()
+    if use_right:
+        kp_right = initialize_model(model_name, POINTS_COUNT)
+        kp_right.load_state_dict(torch.load(kp_right_path, map_location="cpu"))
+        kp_right.eval()
+    
+    # 以存在的模型路徑擷取紀錄資訊
+    epochs, learning_rate, batch_size = extract_info_from_model_path(kp_left_path if use_left else kp_right_path)
 
     # 2) 建結果資料夾
-    result_dir = os.path.join(output_dir, f"{model_name}_crop2side_{epochs}_{learning_rate}_{batch_size}")
+    crop_side = "both-sides" if use_left and use_right else ("left-only" if use_left else "right-only")
+    result_dir = os.path.join(output_dir, f"{model_name}_{crop_side}_{epochs}_{learning_rate}_{batch_size}")
     os.makedirs(result_dir, exist_ok=True)
 
     # NEW: 建立裁切輸出資料夾
@@ -523,21 +621,32 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             x1,y1,x2,y2 = box_left
             x1,y1,x2,y2 = _square_expand_clip(x1,y1,x2,y2, W,H, expand=0.10, keep_square=True)
             crop_left = image_pil.crop((int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)))).convert("L")
-            pred_left_6 = _infer_side_kp(kp_left, crop_left, transform, (x1,y1,x2,y2))  # (6,2)
+            left_crop_name = os.path.splitext(image_file)[0] + "_left_crop.jpg"
+            crop_left.save(os.path.join(crops_left_dir, left_crop_name))
 
-            # 存 left 裁切圖（檔名沿用原圖）
-            left_crop_name = os.path.splitext(image_file)[0] + "_left_crop.jpg"  
-            crop_left.save(os.path.join(crops_left_dir, left_crop_name))         
-            
+            if use_left:
+                # 有左模型：直接推左
+                pred_left_6 = _infer_side_kp(kp_left, crop_left, transform, (x1,y1,x2,y2))
+            else:
+                # 沒左模型、只有右模型：把左鏡像成右 → 用右模型 → 反鏡像 + 重排回左
+                pred_left_6 = _infer_via_mirror(kp_right, crop_left, transform, (x1,y1,x2,y2),
+                                                model_side="right", target_side="left")
+
             # Right
             x1,y1,x2,y2 = box_right
             x1,y1,x2,y2 = _square_expand_clip(x1,y1,x2,y2, W,H, expand=0.10, keep_square=True)
             crop_right = image_pil.crop((int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)))).convert("L")
-            pred_right_6 = _infer_side_kp(kp_right, crop_right, transform, (x1,y1,x2,y2))  # (6,2)
+            right_crop_name = os.path.splitext(image_file)[0] + "_right_crop.jpg"
+            crop_right.save(os.path.join(crops_right_dir, right_crop_name))
 
-            # 存 right 裁切圖（檔名沿用原圖）
-            right_crop_name = os.path.splitext(image_file)[0] + "_right_crop.jpg"  
-            crop_right.save(os.path.join(crops_right_dir, right_crop_name))        
+            if use_right:
+                # 有右模型：直接推右
+                pred_right_6 = _infer_side_kp(kp_right, crop_right, transform, (x1,y1,x2,y2))
+            else:
+                # 沒右模型、只有左模型：把右鏡像成左 → 用左模型 → 反鏡像 + 重排回右
+                pred_right_6 = _infer_via_mirror(kp_left, crop_right, transform, (x1,y1,x2,y2),
+                                                 model_side="left", target_side="right")
+
             
             # 合併成 12 點 (前6=Left, 後6=Right)
             scaled_keypoints = np.vstack([pred_left_6, pred_right_6])  # (12,2)
@@ -615,59 +724,77 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             image_counter += 1  # Increment the image index
 
     # -------------------------------------------------------------- Plotting the average distances and AI angle errors --------------------------------------------------------------
-    # Plot bar chart for avg distances
-    plt.figure(figsize=(16, 6))
-    plt.bar(image_labels, all_avg_distances, color='blue', label='Avg Distance per Image')
-
-    # Overall average distance
-    overall_avg_distance = np.mean(all_avg_distances)
-    plt.axhline(overall_avg_distance, color='red', linestyle='--', label='Overall Avg Distance')
-
-    # Add text for the overall average distance
-    plt.text(len(image_labels) - 1, overall_avg_distance + 0.01, f'Avg: {overall_avg_distance:.2f}', 
-             color='red', fontsize=12, verticalalignment='bottom', horizontalalignment='right')
-
-    plt.xlabel('Image Index')
-    plt.ylabel('Avg Distance')
-    plt.title('Average Distance per Image')
-    plt.xticks(image_labels)  # Set x-ticks to image indices (1, 2, 3, ...)
-
-    plt.legend()
-
-    # Save avg distances chart
+    fig, ax = plt.subplots(figsize=(16, 6))
+    ax.bar(image_labels, all_avg_distances, label='Avg Distance per Image')
+    
+    # μ, σ（用不偏估計：ddof=1；若要母體標準差改成 ddof=0）
+    mu_dist = float(np.mean(all_avg_distances))
+    std_dist = float(np.std(all_avg_distances, ddof=1))
+    # 參考線與±1σ區間
+    add_sigma_guides(ax, mu=mu_dist, std=std_dist, mu_label=f'Overall Avg Dist(μ): {mu_dist:.2f}', label=f'μ ± 1σ (σ={std_dist:.2f})')
+    
+    # 右側 z-score 座標軸
+    add_zscore_right_axis(ax, mu=mu_dist, std=std_dist)
+    
+    ax.set_xlabel('Image Index')
+    ax.set_ylabel('Avg Distance')
+    ax.set_title('Average Distance per Image (with ±σ guides)')
+    ax.set_xticks(image_labels)
+    
+    # 合理的圖例（去重複）
+    handles, labels = ax.get_legend_handles_labels()
+    # 移除重複label
+    from collections import OrderedDict
+    by_label = OrderedDict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
+    
     avg_distances_path = os.path.join(result_dir, f"{model_name}_avg_distances.png")
-    plt.savefig(avg_distances_path)
+    plt.savefig(avg_distances_path, bbox_inches='tight', dpi=150)
     plt.show()
     
-    print(f"Overall average distance: {overall_avg_distance:.2f}")
-    
-    # Bar chart for AI angle errors
-    plt.figure(figsize=(16, 6))
+    print(f"Overall average distance: {mu_dist:.2f} (±{std_dist:.2f})")
+
+    fig, ax = plt.subplots(figsize=(16, 6))
     indices = np.arange(len(image_labels))
-
     bar_width = 0.4
-    plt.bar(indices - bar_width/2, ai_errors_left, width=bar_width, label='Left AI Error', color='magenta')
-    plt.bar(indices + bar_width/2, ai_errors_right, width=bar_width, label='Right AI Error', color='crimson')
 
-    # 平均誤差
-    avg_error_left = np.mean(ai_errors_left)
-    avg_error_right = np.mean(ai_errors_right)
-    avg_error = np.mean([avg_error_left, avg_error_right])
+    ax.bar(indices - bar_width/2, ai_errors_left,  width=bar_width, label='Left AI Error', color='magenta')
+    ax.bar(indices + bar_width/2, ai_errors_right, width=bar_width, label='Right AI Error', color='crimson')
 
-    plt.axhline(avg_error_left, color='magenta', linestyle='--', label=f'Avg Left Error: {avg_error_left:.2f}°')
-    plt.axhline(avg_error_right, color='crimson', linestyle='--', label=f'Avg Right Error: {avg_error_right:.2f}°')
-    plt.axhline(avg_error, color='blue', linestyle='--', label=f'Overall Avg Error: {avg_error:.2f}°')
+    # 左右平均
+    avg_error_left  = float(np.mean(ai_errors_left))
+    avg_error_right = float(np.mean(ai_errors_right))
 
-    plt.xlabel('Image Index')
-    plt.ylabel('AI Angle Error (°)')
-    plt.title('Acetabular Index Angle Errors (Predicted vs. Ground Truth)')
-    plt.xticks(indices, image_labels)
-    plt.legend()
+    ax.axhline(avg_error_left,  linestyle='--', label=f'Avg Left Error: {avg_error_left:.2f}°', color='magenta')
+    ax.axhline(avg_error_right, linestyle='--', label=f'Avg Right Error: {avg_error_right:.2f}°', color='crimson')
 
-    # 儲存圖表
+    # overall μ, σ（把左右合起來當同一個分佈）
+    combined_errors = np.concatenate([np.asarray(ai_errors_left), np.asarray(ai_errors_right)], axis=0)
+    mu_err  = float(np.mean(combined_errors))
+    std_err = float(np.std(combined_errors, ddof=1))
+
+    # overall 參考線與±1σ區間
+    add_sigma_guides(ax, mu=mu_err, std=std_err, mu_label=f'Overall AI Error(μ): {mu_err:.2f}°', label=f'μ ± 1σ (σ={std_err:.2f})', mu_color='blue', color='red')
+
+    # 右側 z-score 座標軸
+    add_zscore_right_axis(ax, mu=mu_err, std=std_err)
+
+    ax.set_xlabel('Image Index')
+    ax.set_ylabel('AI Angle Error (°)')
+    ax.set_title('Acetabular Index Angle Errors (with ±σ guides)')
+    ax.set_xticks(indices, image_labels)
+
+    # 圖例去重複
+    handles, labels = ax.get_legend_handles_labels()
+    from collections import OrderedDict
+    by_label = OrderedDict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
+
     ai_error_chart_path = os.path.join(result_dir, f"{model_name}_AI_angle_errors.png")
-    plt.savefig(ai_error_chart_path)
+    plt.savefig(ai_error_chart_path, bbox_inches='tight', dpi=150)
     plt.show()
+
+    print(f"Overall AI angle error: {mu_err:.2f}° (±{std_err:.2f}°)")
 
     # 計算IHDI classification的混淆矩陣跟準確度
     acc_left, acc_right, acc_all = compute_and_save_confusion_matrices_with_accuracy(
@@ -718,8 +845,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, required=True, help="efficientnet | resnet | vgg")
-    parser.add_argument("--kp_left_path", type=str, required=True, help="left-side KP model (.pth)")
-    parser.add_argument("--kp_right_path", type=str, required=True, help="right-side KP model (.pth)")
+    parser.add_argument("--kp_left_path",  type=str, default="", help="left-side KP model (.pth)")
+    parser.add_argument("--kp_right_path", type=str, default="", help="right-side KP model (.pth)")
     parser.add_argument("--yolo_weights", type=str, required=True, help="YOLO weights (e.g., best.pt)")
     parser.add_argument("--data", type=str, required=True, help="data directory")
     parser.add_argument("--output_dir", type=str, default="results", help="output directory")
@@ -734,4 +861,9 @@ if __name__ == "__main__":
         args.output_dir
     )
 
-# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_750_0.0001_32_best.pth --kp_right_path models/convnext_cropright_750_0.0001_32_best.pth --yolo_weights models/yolo11s.pt --data "data/test" --output_dir "results"
+# 左右雙模型預測
+# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_750_0.0001_32_best.pth --kp_right_path models/convnext_cropright_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
+# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_mirror_750_0.0001_32_best.pth --kp_right_path models/convnext_cropright_mirror_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
+# 單側模型預測
+# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_mirror_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
+# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_right_path models/convnext_cropright_mirror_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
