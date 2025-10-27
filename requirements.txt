@@ -6,7 +6,7 @@ Pillow==12.0.0
 PyQt5==5.15.11
 PyQt5_sip==12.15.0
 scikit_learn==1.3.2
-scipy==1.16.2
+scipy
 torch==2.4.1
 torchvision==0.19.1
 ultralytics==8.3.217
