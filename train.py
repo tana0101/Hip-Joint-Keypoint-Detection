@@ -15,7 +15,7 @@ from model import initialize_model
 
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
-MODELS_DIR = "models"
+MODELS_DIR = "weights"
 POINTS_COUNT = 12  # 12 points (x, y) + 2 center points (x, y)
 
 # Custom dataset class

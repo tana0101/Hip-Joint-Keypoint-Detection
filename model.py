@@ -739,7 +739,7 @@ class ConvNeXtWithTransformer(nn.Module):
         out = self.output_head(x)           # [B, 2*num_points]
         return out
 
-class ConvNeXt(nn.Module):
+class ConvNeXtSmall(nn.Module):
     def __init__(self, num_points):
         super().__init__()
         model = models.convnext_small(pretrained=True)
@@ -807,46 +807,31 @@ class VGG19(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-def initialize_model(model_name, num_points):
-    if model_name == "efficientnet":
-        return EfficientNet(num_points)
-    elif model_name == "efficientnet_FC2048":
-        return EfficientNet_FC2048(num_points)
-    elif model_name == "efficientnet_transformer":
-        return EfficientNetWithTransformer(num_points)
-    elif model_name == "efficientnet_mid_transformer":
-        return EfficientNetMidWithTransformer(num_points)
-    elif model_name == "efficientnet_ms_transformer_4scales_gapconcat":
-        return EfficientNetMultiScaleTransformer_4scales_GAPConcat(num_points)
-    elif model_name == "efficientnet_ms_transformer_3scales_gapconcat":
-        return EfficientNetMultiScaleTransformer_3scales_GAPConcat(num_points)
-    elif model_name == "efficientnet_cbam":
-        return EfficientNetWithCBAM(num_points)
-    elif model_name == "efficientnet_ms_cbam_4scales_gapconcat":
-        return EfficientNetMultiScaleCBAM_4scales_GAPConcat(num_points)
-    elif model_name == "efficientnet_cbam_transformer":
-        return EfficientNetCBAMTransformer(num_points)
-    elif model_name == "efficientnet_ms_cbam_3scales_gated":
-        return EfficientNetMultiScaleCBAM_3scales_GatedFusion(num_points)
-    elif model_name == "efficientnet_ms_cbam_3scales_gapconcat":
-        return EfficientNetMultiScaleCBAM_3scales_GAPConcat(num_points)
-    elif model_name == "efficientnet_ms_3scales_cross_attn":
-        return EfficientNetMultiScale_3scales_CrossAttn(num_points)
-    elif model_name == "convnext_tiny":
-        return ConvNeXtTiny(num_points)
-    elif model_name == "convnext":
-        return ConvNeXt(num_points)
-    elif model_name == "convnext_base":
-        return ConvNeXtBase(num_points)
-    elif model_name == "convnext_large":
-        return ConvNeXtLarge(num_points)
-    elif model_name == "convnext_cbam":
-        return ConvNeXtWithCBAM(num_points)
-    elif model_name == "convnext_transformer":
-        return ConvNeXtWithTransformer(num_points)
-    elif model_name == "resnet":
-        return ResNet50(num_points)
-    elif model_name == "vgg":
-        return VGG19(num_points)
-    else:
-        raise ValueError("Model must be 'efficientnet', 'efficientnet_FC2048', 'efficientnet_transformer', 'efficientnet_mid_transformer', 'efficientnet_cbam', 'resnet', or 'vgg'.")
+MODEL = {
+    "efficientnet": EfficientNet,
+    "efficientnet_FC2048": EfficientNet_FC2048,
+    "efficientnet_transformer": EfficientNetWithTransformer,
+    "efficientnet_mid_transformer": EfficientNetMidWithTransformer,
+    "efficientnet_ms_transformer_4scales_gapconcat": EfficientNetMultiScaleTransformer_4scales_GAPConcat,
+    "efficientnet_ms_transformer_3scales_gapconcat": EfficientNetMultiScaleTransformer_3scales_GAPConcat,
+    "efficientnet_cbam": EfficientNetWithCBAM,
+    "efficientnet_cbam_transformer": EfficientNetCBAMTransformer,
+    "efficientnet_ms_cbam_4scales_gapconcat": EfficientNetMultiScaleCBAM_4scales_GAPConcat,
+    "efficientnet_ms_cbam_3scales_gated": EfficientNetMultiScaleCBAM_3scales_GatedFusion,
+    "efficientnet_ms_cbam_3scales_gapconcat": EfficientNetMultiScaleCBAM_3scales_GAPConcat,
+    "efficientnet_ms_3scales_cross_attn": EfficientNetMultiScale_3scales_CrossAttn,
+    "convnext_tiny": ConvNeXtTiny,
+    "convnext": ConvNeXtSmall,
+    "convnext_base": ConvNeXtBase,
+    "convnext_large": ConvNeXtLarge,
+    "convnext_cbam": ConvNeXtWithCBAM,
+    "convnext_transformer": ConvNeXtWithTransformer,
+    "resnet": ResNet50,
+    "vgg": VGG19
+}
+
+def initialize_model(model_name, num_points, **kwargs):
+    model_name = model_name.lower()
+    if model_name not in MODEL:
+        raise ValueError(f"Unknown model: {model_name}")
+    return MODEL[model_name](num_points, **kwargs)

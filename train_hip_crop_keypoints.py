@@ -17,7 +17,7 @@ import json
 
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
-MODELS_DIR = "models"
+MODELS_DIR = "weights"
 POINTS_COUNT = 6  # 每側6個關鍵點
 
 SIDE_LABELS = {"left": "LeftHip", "right": "RightHip"}
