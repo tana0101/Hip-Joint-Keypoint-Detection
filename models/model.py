@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from .convnextv2 import convnextv2_tiny, convnextv2_base, convnextv2_large
 
 class EfficientNetWithTransformer(nn.Module):
     def __init__(self, num_points: int, image_size: int = 224,
@@ -783,6 +784,51 @@ class ConvNeXtLarge(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+class ConvNeXtV2Tiny(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = convnextv2_tiny(num_classes=1000)
+        pretrained_path = "https://dl.fbaipublicfiles.com/convnext/convnextv2/im1k/convnextv2_tiny_1k_224_ema.pt"
+        state_dict = torch.hub.load_state_dict_from_url(pretrained_path, progress=True)
+        model.load_state_dict(state_dict['model'])
+
+        in_dim = model.head.in_features
+        model.head = nn.Linear(in_dim, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
+
+class ConvNeXtV2Base(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = convnextv2_base(num_classes=1000)
+        pretrained_path = "https://dl.fbaipublicfiles.com/convnext/convnextv2/im1k/convnextv2_base_1k_224_ema.pt"
+        state_dict = torch.hub.load_state_dict_from_url(pretrained_path, progress=True)
+        model.load_state_dict(state_dict['model'])
+
+        in_dim = model.head.in_features
+        model.head = nn.Linear(in_dim, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
+
+class ConvNeXtV2Large(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = convnextv2_large(num_classes=1000)
+        pretrained_path = "https://dl.fbaipublicfiles.com/convnext/convnextv2/im1k/convnextv2_large_1k_224_ema.pt"
+        state_dict = torch.hub.load_state_dict_from_url(pretrained_path, progress=True)
+        model.load_state_dict(state_dict['model'])
+
+        in_dim = model.head.in_features
+        model.head = nn.Linear(in_dim, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
+
 class ResNet50(nn.Module):
     def __init__(self, num_points):
         super().__init__()
@@ -826,6 +872,9 @@ MODEL = {
     "convnext_large": ConvNeXtLarge,
     "convnext_cbam": ConvNeXtWithCBAM,
     "convnext_transformer": ConvNeXtWithTransformer,
+    "convnext_v2_tiny": ConvNeXtV2Tiny,
+    "convnext_v2_base": ConvNeXtV2Base,
+    "convnext_v2_large": ConvNeXtV2Large,
     "resnet": ResNet50,
     "vgg": VGG19
 }
