@@ -11,7 +11,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
-from model import initialize_model
+
+from models.model import initialize_model
 
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"

@@ -11,7 +11,8 @@ import pandas as pd
 import re
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score
 from scipy.stats import pearsonr, spearmanr, kendalltau
-from model import initialize_model
+
+from models.model import initialize_model
 
 IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 12

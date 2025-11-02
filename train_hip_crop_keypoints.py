@@ -12,8 +12,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
-from model import initialize_model
 import json
+
+from models.model import initialize_model
 
 IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
@@ -583,7 +584,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
             best_model_state = model.state_dict()  # Save the model state at the best point
             print(f"Validation loss improved, saving model.")
             
-        if epoch + 1 == 500:
+        if epoch + 1 == 150:
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= 0.1
             print(f"[Epoch {epoch+1}] Learning rate manually reduced.")
