@@ -54,8 +54,14 @@ def _infer_side_kp(kp_model, pil_crop, transform, crop_box):
     crop_w, crop_h = (x2 - x1), (y2 - y1)
     # 前處理（與訓練一致）
     crop_tensor = transform(pil_crop).unsqueeze(0)   # [1,3,224,224]
-    with torch.no_grad():
-        pred = kp_model(crop_tensor).cpu().numpy().reshape(-1, 2)  # (6,2) in 224x224
+    
+    # 取得模型所在裝置，並把輸入搬到同裝置
+    device = next(kp_model.parameters()).device
+    crop_tensor = crop_tensor.to(device, non_blocking=True)
+    
+    with torch.inference_mode():
+        pred = kp_model(crop_tensor).detach().cpu().numpy().reshape(-1, 2)  # (6,2) in 224x224
+    
     # 反映射回原圖
     sx, sy = crop_w / IMAGE_SIZE, crop_h / IMAGE_SIZE
     pred_orig = np.empty_like(pred)
@@ -76,19 +82,6 @@ def _reorder_between_sides(kpts_6x2, from_side, to_side):
         return kpts_6x2
     return kpts_6x2[REORDER_6, :]
 
-def _infer_side_kp(kp_model, pil_crop, transform, crop_box):
-    """裁切→前處理→推論→反投影回原圖座標。回傳 (6,2) numpy（該模型的“側別順序”）。"""
-    x1, y1, x2, y2 = crop_box
-    crop_w, crop_h = (x2 - x1), (y2 - y1)
-    crop_tensor = transform(pil_crop).unsqueeze(0)
-    with torch.no_grad():
-        pred_224 = kp_model(crop_tensor).cpu().numpy().reshape(-1, 2)  # (6,2)
-    sx, sy = crop_w / IMAGE_SIZE, crop_h / IMAGE_SIZE
-    pred_orig = np.empty_like(pred_224)
-    pred_orig[:, 0] = pred_224[:, 0] * sx + x1
-    pred_orig[:, 1] = pred_224[:, 1] * sy + y1
-    return pred_orig
-
 def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, target_side):
     """
     單模型模式：把 'target_side' 的裁切圖鏡像成 'model_side' 外觀 → 用該模型推論 →
@@ -100,8 +93,12 @@ def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, t
 
     # 2) 模型在鏡像空間推論（得到 model_side 順序，座標=224）
     crop_tensor = transform(pil_mirror).unsqueeze(0)
-    with torch.no_grad():
-        pred_model_224 = kp_model(crop_tensor).cpu().numpy().reshape(-1, 2)
+    # 取得模型所在裝置，並把輸入搬到同裝置
+    device = next(kp_model.parameters()).device
+    crop_tensor = crop_tensor.to(device, non_blocking=True)
+    
+    with torch.inference_mode():
+        pred_model_224 = kp_model(crop_tensor).detach().cpu().numpy().reshape(-1, 2)  # (6,2) in 224x224
 
     # 3) 224 空間反鏡像回未鏡像空間
     pred_unflipped_224 = _hflip_kpts_224(pred_model_224)
@@ -539,13 +536,16 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     assert use_left or use_right, "至少提供 --kp_left_path 或 --kp_right_path 其中之一"
     
     kp_left = kp_right = None
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if use_left:
         kp_left = initialize_model(model_name, POINTS_COUNT)
         kp_left.load_state_dict(torch.load(kp_left_path, map_location="cpu"))
+        kp_left.to(device)
         kp_left.eval()
     if use_right:
         kp_right = initialize_model(model_name, POINTS_COUNT)
         kp_right.load_state_dict(torch.load(kp_right_path, map_location="cpu"))
+        kp_right.to(device)
         kp_right.eval()
     
     # 以存在的模型路徑擷取紀錄資訊
