@@ -1,7 +1,14 @@
-import torch
+import argparse, torch
+torch.serialization.add_safe_globals([argparse.Namespace])
+
 import torch.nn as nn
 import torchvision.models as models
-from .convnextv2 import convnextv2_tiny, convnextv2_base, convnextv2_large
+from .convnextv2.convnextv2 import (
+    convnextv2_tiny,
+    convnextv2_base,
+    convnextv2_large
+)
+from mambavision import create_model
 
 class EfficientNetWithTransformer(nn.Module):
     def __init__(self, num_points: int, image_size: int = 224,
@@ -792,8 +799,8 @@ class ConvNeXtV2Tiny(nn.Module):
         state_dict = torch.hub.load_state_dict_from_url(pretrained_path, progress=True)
         model.load_state_dict(state_dict['model'])
 
-        in_dim = model.head.in_features
-        model.head = nn.Linear(in_dim, num_points * 2)
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, num_points * 2)
         self.model = model
 
     def forward(self, x):
@@ -807,8 +814,8 @@ class ConvNeXtV2Base(nn.Module):
         state_dict = torch.hub.load_state_dict_from_url(pretrained_path, progress=True)
         model.load_state_dict(state_dict['model'])
 
-        in_dim = model.head.in_features
-        model.head = nn.Linear(in_dim, num_points * 2)
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, num_points * 2)
         self.model = model
 
     def forward(self, x):
@@ -822,10 +829,46 @@ class ConvNeXtV2Large(nn.Module):
         state_dict = torch.hub.load_state_dict_from_url(pretrained_path, progress=True)
         model.load_state_dict(state_dict['model'])
 
-        in_dim = model.head.in_features
-        model.head = nn.Linear(in_dim, num_points * 2)
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, num_points * 2)
         self.model = model
 
+    def forward(self, x):
+        return self.model(x)
+
+class MambaVisionSmall(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = create_model('mamba_vision_S', pretrained=True, model_path="/tmp/mambavision_small_1k.pth.tar")
+        
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, num_points * 2)
+        self.model = model
+    
+    def forward(self, x):
+        return self.model(x)
+
+class MambaVisionBase(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = create_model('mamba_vision_B', pretrained=True, model_path="/tmp/mambavision_base_1k.pth.tar")
+        
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, num_points * 2)
+        self.model = model
+    
+    def forward(self, x):
+        return self.model(x)
+    
+class MambaVisionLarge(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = create_model('mamba_vision_L', pretrained=True, model_path="/tmp/mambavision_large_1k.pth.tar")
+        
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, num_points * 2)
+        self.model = model
+    
     def forward(self, x):
         return self.model(x)
 
@@ -875,6 +918,9 @@ MODEL = {
     "convnext_v2_tiny": ConvNeXtV2Tiny,
     "convnext_v2_base": ConvNeXtV2Base,
     "convnext_v2_large": ConvNeXtV2Large,
+    "mambavision_small": MambaVisionSmall,
+    "mambavision_base": MambaVisionBase,
+    "mambavision_large": MambaVisionLarge,
     "resnet": ResNet50,
     "vgg": VGG19
 }

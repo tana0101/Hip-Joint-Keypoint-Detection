@@ -4,9 +4,24 @@ python3 predict.py --model_name "convnext_large" --model_path "models/convnext_l
 python3 kfold_train.py --data_dir dataset/xray_IHDI_4/ --model_name "efficientnet" --epochs 1000 --learning_rate 0.01 --batch_size 32 --k_folds 3
 python3 kfold_predict.py --models_dir models --model_name "efficientnet" --val_data_dir dataset/xray_IHDI_4/ --output_dir "results/folds/02" --k_folds 3
 
-python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext_v2_large --epochs 200 --learning_rate 0.0001 --batch_size 32 --side left --mirror
-python3 predict_hip_crop_keypoints.py --model_name convnext_v2_large --kp_left_path weights/convnext_v2_large_cropleft_mirror_200_0.0001_32_best.pth --kp_right_path weights/convnext_v2_large_cropright_mirror_200_0.0001_32_best.pth --yolo_weights weights/yolo12s.pt --data "data/test" --output_dir "results"
+python3 train_hip_crop_keypoints.py --data_dir data --model_name mambavision_large --epochs 750 --learning_rate 0.0001 --batch_size 32 --side left --mirror
+python3 predict_hip_crop_keypoints.py --model_name mambavision_small --kp_left_path weights/mambavision_small_cropleft_750_0.0001_32_best.pth --kp_right_path weights/mambavision_small_cropright_750_0.0001_32_best.pth --yolo_weights weights/yolo12s.pt --data "data/test" --output_dir "results"
 
 resnet
 efficientnet
 resnet_keypoint_300_0.01_32.pth
+
+已修正：learning_rate 的正則表達式改為允許科學記號表示法
+須修正：ai 角度的標準差圖示
+
+
+conda create -n kpd2 python=3.11 -y
+
+pip install --index-url https://download.pytorch.org/whl/cu124 \
+  torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
+
+pip install --no-build-isolation "mamba-ssm==2.2.4"
+
+pip install -r requirements.txt
+
+pip install mambavision
