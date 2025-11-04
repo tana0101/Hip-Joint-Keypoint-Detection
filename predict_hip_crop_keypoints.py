@@ -520,14 +520,14 @@ def add_sigma_guides(ax, mu, std, one_sigma_alpha=0.10, line_alpha=0.35, mu_labe
 
 def add_zscore_right_axis(ax, mu, std):
     """
-    增加右側z-score座標軸，刻度在 -2, -1, 0, 1, 2。
+    在右側加上 z-score 軸（標準化差異）。
     """
-    ax2 = ax.twinx()
-    y0, y1 = ax.get_ylim()
-    ax2.set_ylim((y0 - mu) / std, (y1 - mu) / std)
-    ax2.set_ylabel('Standardized difference (σ)')
-    ax2.set_yticks([-2, -1, 0, 1, 2])
-    return ax2
+    def y_to_z(y): return (y - mu) / std
+    def z_to_y(z): return z * std + mu
+    secax = ax.secondary_yaxis('right', functions=(y_to_z, z_to_y))
+    secax.set_ylabel('Standardized difference (σ)')
+    secax.set_yticks([-2, -1, 0, 1, 2])
+    return secax
     
 def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir):
     
