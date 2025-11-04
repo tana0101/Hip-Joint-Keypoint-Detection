@@ -132,7 +132,7 @@ def calculate_avg_distance(predicted_keypoints, original_keypoints):
 
 def extract_info_from_model_path(model_path):
     # Extract epochs, learning_rate, and batch_size from the model_path
-    match = re.search(r'_(\d+)_(\d+\.\d+)_(\d+)_best\.pth', model_path)
+    match = re.search(r'_(\d+)_([0-9eE\.\-]+)_(\d+)_best\.pth', model_path)
     if match:
         epochs = int(match.group(1))
         learning_rate = float(match.group(2))
