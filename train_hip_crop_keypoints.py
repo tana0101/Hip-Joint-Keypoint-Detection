@@ -18,7 +18,6 @@ import json
 
 from models.model import initialize_model
 
-IMAGE_SIZE = 224 # Image size for the model
 LOGS_DIR = "logs"
 MODELS_DIR = "weights"
 POINTS_COUNT = 6  # 每側6個關鍵點
@@ -68,7 +67,7 @@ def parse_12pt_csv_to_np(annotation_csv_path):
 # Custom dataset class
 class HipCropKeypointDataset(Dataset):
     def __init__(self, img_dir, annotation_dir, detections_dir, side="left",
-                 transform=None, crop_expand=0.10, keep_square=True):
+                 transform=None, crop_expand=0.10, keep_square=True, input_size=224):
         """
         Args:
             img_dir:      train/images
@@ -89,6 +88,7 @@ class HipCropKeypointDataset(Dataset):
         self.side_start, self.side_end = SIDE_INDEX[self.side]
         self.crop_expand = crop_expand
         self.keep_square = keep_square
+        self.input_size = input_size
 
         self.images = sorted([f for f in os.listdir(img_dir) if f.endswith(".jpg")])
         self.annotations = sorted([f for f in os.listdir(annotation_dir) if f.endswith(".csv")])
@@ -155,8 +155,8 @@ class HipCropKeypointDataset(Dataset):
         img_out = self.transform(img_crop)  # Tensor [3, 224, 224]
 
         # 裁切→縮放比例（到 224×224）
-        sx = IMAGE_SIZE / crop_w
-        sy = IMAGE_SIZE / crop_h
+        sx = self.input_size / crop_w
+        sy = self.input_size / crop_h
         pts6_resized = np.empty_like(pts6_crop)
         pts6_resized[:, 0] = pts6_crop[:, 0] * sx
         pts6_resized[:, 1] = pts6_crop[:, 1] * sy
@@ -279,7 +279,7 @@ def calculate_nme(preds, targets, img_size):
     # Return the mean of the normalized distances
     return np.mean(norm_distances)
 
-def calculate_pixel_error(preds, targets, img_size):
+def calculate_pixel_error(preds, targets, img_size, input_size):
     """
     Pixel error in crop pixel units.
     img_size: (crop_width, crop_height)
@@ -291,8 +291,8 @@ def calculate_pixel_error(preds, targets, img_size):
     original_width, original_height = img_size
 
     # Calculate the scaling factors for width and height
-    scale_x = original_width / IMAGE_SIZE  # Assuming IMAGE_SIZE is the model input size
-    scale_y = original_height / IMAGE_SIZE
+    scale_x = original_width / input_size  # Assuming input_size is the model input size
+    scale_y = original_height / input_size
 
     # Scale the predictions and targets
     preds_scaled = preds * np.array([scale_x, scale_y])  # Shape: (12, 2)
@@ -412,11 +412,11 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
 
     plt.tight_layout()
 
-def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
+def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror):
     transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=3),
         transforms.Lambda(lambda img: ImageOps.equalize(img)),
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.Resize((input_size, input_size)),
         transforms.ToTensor(),
     ])
 
@@ -428,7 +428,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
         side=side,
         transform=transform,
         crop_expand=0.10,
-        keep_square=True
+        keep_square=True,
+        input_size=input_size
     )
     val_dataset = HipCropKeypointDataset(
         img_dir=os.path.join(data_dir, 'val/images'),
@@ -437,7 +438,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
         side=side,
         transform=transform,
         crop_expand=0.10,
-        keep_square=True
+        keep_square=True,
+        input_size=input_size
     )
     
     # 使用鏡像資料擴增
@@ -450,7 +452,8 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
             side=opposite_side,
             transform=transform,
             crop_expand=0.10,
-            keep_square=True
+            keep_square=True,
+            input_size=input_size
         )
         mirrored_dataset = MirroredToSideDataset(opposite_train_dataset, target_side=side)
         # 合併原本的單側資料集與鏡像資料集
@@ -490,11 +493,11 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
     best_val_loss, best_model_state = float('inf'), None
 
     # TensorBoard writer
-    run_name = f"{model_name}_crop{side}" + ("_mirror" if mirror else "") + f"_{epochs}_{learning_rate}_{batch_size}"
+    run_name = f"{model_name}_crop{side}" + ("_mirror" if mirror else "") + f"_{input_size}_{epochs}_{learning_rate}_{batch_size}"
     tb_dir = os.path.join(LOGS_DIR, "tb", run_name)
     writer = SummaryWriter(log_dir=tb_dir)
     try:
-        dummy = torch.randn(1, 3, IMAGE_SIZE, IMAGE_SIZE, device=device)
+        dummy = torch.randn(1, 3, input_size, input_size, device=device)
         writer.add_graph(model, dummy)
     except Exception as e:
         print(f"[TB] Skip add_graph: {e}")
@@ -538,7 +541,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
                 img_size = crop_sizes[i]
 
                 nme = calculate_nme(preds[i], targets[i], img_size)
-                pixel_error = calculate_pixel_error(preds[i], targets[i], img_size)
+                pixel_error = calculate_pixel_error(preds[i], targets[i], img_size, input_size)
 
                 nme_list.append(nme)
                 pixel_error_list.append(pixel_error)
@@ -585,7 +588,7 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
                     img_size = crop_sizes[i]
 
                     nme = calculate_nme(preds[i], targets[i], img_size)
-                    pixel_error = calculate_pixel_error(preds[i], targets[i], img_size)
+                    pixel_error = calculate_pixel_error(preds[i], targets[i], img_size, input_size)
 
                     val_nmes_list.append(nme)
                     val_pixel_error_list.append(pixel_error)
@@ -623,15 +626,15 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
     # Save the best model (with the lowest validation loss)
     if best_model_state:
         if mirror:
-            model_path = f"{MODELS_DIR}/{model_name}_crop{side}_mirror_{epochs}_{learning_rate}_{batch_size}_best.pth"
+            model_path = f"{MODELS_DIR}/{model_name}_crop{side}_mirror_{input_size}_{epochs}_{learning_rate}_{batch_size}_best.pth"
         else:
-            model_path = f"{MODELS_DIR}/{model_name}_crop{side}_{epochs}_{learning_rate}_{batch_size}_best.pth"
+            model_path = f"{MODELS_DIR}/{model_name}_crop{side}_{input_size}_{epochs}_{learning_rate}_{batch_size}_best.pth"
         torch.save(best_model_state, model_path)
         print(f"Best model saved to: {model_path}")
 
     # Log hyperparameters and metrics to TensorBoard
     hparam_dict = {"model": model_name, "side": side, "mirror": int(mirror),
-               "epochs": epochs, "lr": learning_rate, "batch_size": batch_size, "image_size": IMAGE_SIZE}
+               "epochs": epochs, "lr": learning_rate, "batch_size": batch_size, "image_size": input_size}
     metric_dict = {"hparam/best_val_loss": best_val_loss,
                    "hparam/final_val_loss": val_losses[-1] if len(val_losses) else float('inf'),
                    "hparam/final_val_nme": val_nmes[-1] if len(val_nmes) else 0.0}
@@ -652,18 +655,18 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
 
     # Save the training plot
     if mirror:
-        training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_crop{side}_mirror_{epochs}_{learning_rate}_{batch_size}.png"
+        training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_crop{side}_mirror_{input_size}_{epochs}_{learning_rate}_{batch_size}.png"
     else:
-        training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_crop{side}_{epochs}_{learning_rate}_{batch_size}.png"
+        training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_crop{side}_{input_size}_{epochs}_{learning_rate}_{batch_size}.png"
     plt.savefig(training_plot_path)
     print(f"Training plot saved to: {training_plot_path}")
     plt.show()
 
     # Save the Loss, NME, and Pixel Error to a text file
     if mirror:
-        training_log_path = f"{LOGS_DIR}/{model_name}_training_log_crop{side}_mirror_{epochs}_{learning_rate}_{batch_size}.txt"
+        training_log_path = f"{LOGS_DIR}/{model_name}_training_log_crop{side}_mirror_{input_size}_{epochs}_{learning_rate}_{batch_size}.txt"
     else:
-        training_log_path = f"{LOGS_DIR}/{model_name}_training_log_crop{side}_{epochs}_{learning_rate}_{batch_size}.txt"
+        training_log_path = f"{LOGS_DIR}/{model_name}_training_log_crop{side}_{input_size}_{epochs}_{learning_rate}_{batch_size}.txt"
     with open(training_log_path, "w") as f:
         for epoch, (loss, nme, pixel_error, val_loss, val_nme, val_pixel_error) in enumerate(
                 zip(epoch_losses, epoch_nmes, epoch_pixel_errors, val_losses, val_nmes, val_pixel_errors), 1):
@@ -676,13 +679,14 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, required=True, help="Path to the dataset directory")
     parser.add_argument("--model_name", type=str, required=True, help="Model name: 'efficientnet', 'resnet', or 'vgg'")
     parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs")
+    parser.add_argument("--input_size", type=int, default=224, help="Input image size for the model")
     parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--batch_size", type=int, default=8, help="Number of samples per batch")
     parser.add_argument("--side", type=str, default="left", choices=["left", "right"], help="Side to train on: 'left' or 'right'")
     parser.add_argument("--mirror", action="store_true", help="Whether to include mirrored data from the opposite side")
     args = parser.parse_args()
 
-    main(args.data_dir, args.model_name, args.epochs, args.learning_rate,
+    main(args.data_dir, args.model_name, args.input_size, args.epochs, args.learning_rate,
          args.batch_size, args.side, args.mirror)
 
-    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --epochs 750 --learning_rate 0.0001 --batch_size 32 --side left
+    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --input_size 448 --epochs 750 --learning_rate 0.0001 --batch_size 32 --side left
