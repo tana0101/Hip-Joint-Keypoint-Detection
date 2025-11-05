@@ -15,7 +15,6 @@ from ultralytics import YOLO
 
 from models.model import initialize_model
 
-IMAGE_SIZE = 224 # Image size for the model
 POINTS_COUNT = 6
 REORDER_6 = [2, 1, 0, 5, 4, 3]  # 單側6點在左右鏡像後的索引重排（3點一組反轉）
 
@@ -48,7 +47,7 @@ def _detect_one(yolo_model, pil_img, cls_id, conf=0.05, iou=0.5):
     xyxy = res[0].boxes.xyxy[0].cpu().numpy().tolist()  # [x1,y1,x2,y2]
     return tuple(float(v) for v in xyxy)
 
-def _infer_side_kp(kp_model, pil_crop, transform, crop_box):
+def _infer_side_kp(kp_model, pil_crop, transform, crop_box, input_size):
     """對單側裁切圖做前處理→預測→轉回原圖座標系 (回傳 shape=(6,2) 的 numpy)。"""
     x1, y1, x2, y2 = crop_box
     crop_w, crop_h = (x2 - x1), (y2 - y1)
@@ -63,17 +62,17 @@ def _infer_side_kp(kp_model, pil_crop, transform, crop_box):
         pred = kp_model(crop_tensor).detach().cpu().numpy().reshape(-1, 2)  # (6,2) in 224x224
     
     # 反映射回原圖
-    sx, sy = crop_w / IMAGE_SIZE, crop_h / IMAGE_SIZE
+    sx, sy = crop_w / input_size, crop_h / input_size
     pred_orig = np.empty_like(pred)
     pred_orig[:, 0] = pred[:, 0] * sx + x1
     pred_orig[:, 1] = pred[:, 1] * sy + y1
     return pred_orig  # (6,2)
 
 # 使用鏡像模型預測函式
-def _hflip_kpts_224(kpts_6x2):
+def _hflip_kpts_224(kpts_6x2, input_size):
     """在 224x224 空間水平鏡像單側6點（numpy, shape=(6,2)）"""
     out = kpts_6x2.copy()
-    out[:, 0] = (IMAGE_SIZE - 1) - out[:, 0]
+    out[:, 0] = (input_size - 1) - out[:, 0]
     return out
 
 def _reorder_between_sides(kpts_6x2, from_side, to_side):
@@ -82,7 +81,7 @@ def _reorder_between_sides(kpts_6x2, from_side, to_side):
         return kpts_6x2
     return kpts_6x2[REORDER_6, :]
 
-def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, target_side):
+def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, target_side, input_size):
     """
     單模型模式：把 'target_side' 的裁切圖鏡像成 'model_side' 外觀 → 用該模型推論 →
     在 224 空間反鏡像回來 → 做 from=model_side → to=target_side 的索引重排 → 反投影回原圖。
@@ -101,7 +100,7 @@ def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, t
         pred_model_224 = kp_model(crop_tensor).detach().cpu().numpy().reshape(-1, 2)  # (6,2) in 224x224
 
     # 3) 224 空間反鏡像回未鏡像空間
-    pred_unflipped_224 = _hflip_kpts_224(pred_model_224)
+    pred_unflipped_224 = _hflip_kpts_224(pred_model_224, input_size)
 
     # 4) 索引重排：model_side → target_side
     pred_target_224 = _reorder_between_sides(pred_unflipped_224, from_side=model_side, to_side=target_side)
@@ -109,7 +108,7 @@ def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, t
     # 5) 反投影回原圖
     x1, y1, x2, y2 = crop_box
     crop_w, crop_h = (x2 - x1), (y2 - y1)
-    sx, sy = crop_w / IMAGE_SIZE, crop_h / IMAGE_SIZE
+    sx, sy = crop_w / input_size, crop_h / input_size
     pred_target_orig = np.empty_like(pred_target_224)
     pred_target_orig[:, 0] = pred_target_224[:, 0] * sx + x1
     pred_target_orig[:, 1] = pred_target_224[:, 1] * sy + y1
@@ -128,15 +127,27 @@ def calculate_avg_distance(predicted_keypoints, original_keypoints):
     return avg_distance
 
 def extract_info_from_model_path(model_path):
-    # Extract epochs, learning_rate, and batch_size from the model_path
-    match = re.search(r'_(\d+)_([0-9eE\.\-]+)_(\d+)_best\.pth', model_path)
-    if match:
-        epochs = int(match.group(1))
-        learning_rate = float(match.group(2))
-        batch_size = int(match.group(3))
-        return epochs, learning_rate, batch_size
-    else:
-        raise ValueError("Model path format is invalid. Expected format: model_name_epochs_lr_batchsize.pth")
+    # 嘗試匹配包含 input_size 的版本: _<input_size>_<epochs>_<lr>_<batch>_best.pth
+    match_with_input = re.search(r'_(\d+)_([0-9]+)_([0-9eE\.\-]+)_([0-9]+)_best\.pth', model_path)
+    if match_with_input:
+        input_size = int(match_with_input.group(1))
+        epochs = int(match_with_input.group(2))
+        learning_rate = float(match_with_input.group(3))
+        batch_size = int(match_with_input.group(4))
+        return input_size, epochs, learning_rate, batch_size
+
+    # 匹配不含 input_size 的版本: _<epochs>_<lr>_<batch>_best.pth
+    match_without_input = re.search(r'_(\d+)_([0-9eE\.\-]+)_(\d+)_best\.pth', model_path)
+    if match_without_input:
+        input_size = 224 # 預設值
+        epochs = int(match_without_input.group(1))
+        learning_rate = float(match_without_input.group(2))
+        batch_size = int(match_without_input.group(3))
+        return input_size, epochs, learning_rate, batch_size
+
+    # 都不符合時報錯
+    raise ValueError("Model path format is invalid. Expected format like: "
+                     "model_name_[input_size_]epochs_lr_batchsize_best.pth")
 
 def draw_hilgenreiner_line(ax, p3, p7):
     if np.allclose(p3[0], p7[0]):
@@ -549,11 +560,11 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         kp_right.eval()
     
     # 以存在的模型路徑擷取紀錄資訊
-    epochs, learning_rate, batch_size = extract_info_from_model_path(kp_left_path if use_left else kp_right_path)
+    input_size, epochs, learning_rate, batch_size = extract_info_from_model_path(kp_left_path if use_left else kp_right_path)
 
     # 2) 建結果資料夾
     crop_side = "both-sides" if use_left and use_right else ("left-only" if use_left else "right-only")
-    result_dir = os.path.join(output_dir, f"{model_name}_{crop_side}_{epochs}_{learning_rate}_{batch_size}")
+    result_dir = os.path.join(output_dir, f"{model_name}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}")
     os.makedirs(result_dir, exist_ok=True)
 
     # NEW: 建立裁切輸出資料夾
@@ -584,7 +595,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=3),  
         transforms.Lambda(lambda img: ImageOps.equalize(img)),  # Apply histogram equalization
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+        transforms.Resize((input_size, input_size)),
         transforms.ToTensor(),
     ])
 
@@ -627,11 +638,11 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
 
             if use_left:
                 # 有左模型：直接推左
-                pred_left_6 = _infer_side_kp(kp_left, crop_left, transform, (x1,y1,x2,y2))
+                pred_left_6 = _infer_side_kp(kp_left, crop_left, transform, (x1,y1,x2,y2), input_size)
             else:
                 # 沒左模型、只有右模型：把左鏡像成右 → 用右模型 → 反鏡像 + 重排回左
                 pred_left_6 = _infer_via_mirror(kp_right, crop_left, transform, (x1,y1,x2,y2),
-                                                model_side="right", target_side="left")
+                                                model_side="right", target_side="left", input_size=input_size)
 
             # Right
             x1,y1,x2,y2 = box_right
@@ -642,11 +653,11 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
 
             if use_right:
                 # 有右模型：直接推右
-                pred_right_6 = _infer_side_kp(kp_right, crop_right, transform, (x1,y1,x2,y2))
+                pred_right_6 = _infer_side_kp(kp_right, crop_right, transform, (x1,y1,x2,y2), input_size)
             else:
                 # 沒右模型、只有左模型：把右鏡像成左 → 用左模型 → 反鏡像 + 重排回右
                 pred_right_6 = _infer_via_mirror(kp_left, crop_right, transform, (x1,y1,x2,y2),
-                                                 model_side="left", target_side="right")
+                                                 model_side="left", target_side="right", input_size=input_size)
 
             
             # 合併成 12 點 (前6=Left, 後6=Right)
