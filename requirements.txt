@@ -8,3 +8,4 @@ PyQt5_sip==12.15.0
 scikit_learn==1.3.2
 scipy
 ultralytics==8.3.217
+tensorboard

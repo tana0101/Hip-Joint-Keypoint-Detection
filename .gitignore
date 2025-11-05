@@ -1,1 +1,4 @@
 *.pth
+logs/tb/
+*.tfevents.*
+events.out.tfevents.*

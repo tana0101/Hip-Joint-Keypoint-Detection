@@ -5,15 +5,17 @@ python3 kfold_train.py --data_dir dataset/xray_IHDI_4/ --model_name "efficientne
 python3 kfold_predict.py --models_dir models --model_name "efficientnet" --val_data_dir dataset/xray_IHDI_4/ --output_dir "results/folds/02" --k_folds 3
 
 python3 train_hip_crop_keypoints.py --data_dir data --model_name mambavision_base --epochs 1000 --learning_rate 0.0001 --batch_size 32 --side right --mirror
-python3 predict_hip_crop_keypoints.py --model_name convnext --kp_right_path weights/convnext_cropright_mirror_750_0.0001_32_best.pth --yolo_weights weights/yolo12s.pt --data "data/test" --output_dir "results"
+python3 predict_hip_crop_keypoints.py --model_name mambavision_base --kp_left_path weights/mambavision_base_cropleft_mirror_1000_0.0001_32_best.pth --yolo_weights weights/yolo12s.pt --data "data/test" --output_dir "results"
 
 resnet
 efficientnet
 resnet_keypoint_300_0.01_32.pth
 
-已修正：learning_rate 的正則表達式改為允許科學記號表示法
-須修正：ai 角度的標準差圖示
+-- Launch TensorBoard --
 
+tensorboard --logdir logs --port 6006 --host 0.0.0.0
+
+-- Install Environment --
 
 conda create -n kpd2 python=3.11 -y
 
