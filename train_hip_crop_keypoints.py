@@ -6,6 +6,8 @@ import torch.optim as optim
 from torchvision import models, transforms
 import torchvision.transforms.functional as TF
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
+from torch.utils.tensorboard import SummaryWriter
+from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from PIL import Image
 import pandas as pd
@@ -487,6 +489,18 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
     val_losses, val_nmes, val_pixel_errors = [], [], []
     best_val_loss, best_model_state = float('inf'), None
 
+    # TensorBoard writer
+    run_name = f"{model_name}_crop{side}" + ("_mirror" if mirror else "") + f"_{epochs}_{learning_rate}_{batch_size}"
+    tb_dir = os.path.join(LOGS_DIR, "tb", run_name)
+    writer = SummaryWriter(log_dir=tb_dir)
+    try:
+        dummy = torch.randn(1, 3, IMAGE_SIZE, IMAGE_SIZE, device=device)
+        writer.add_graph(model, dummy)
+    except Exception as e:
+        print(f"[TB] Skip add_graph: {e}")
+
+    global_step = 0
+
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
@@ -528,6 +542,10 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
 
                 nme_list.append(nme)
                 pixel_error_list.append(pixel_error)
+            
+            # Log step loss to TensorBoard
+            writer.add_scalar("train/step_loss", loss.item(), global_step)
+            global_step += 1
 
         epoch_loss = running_loss / len(train_loader)
         epoch_nme = float(np.mean(nme_list)) if nme_list else 0.0
@@ -590,6 +608,18 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
         #     print(f"[Epoch {epoch+1}] Learning rate manually reduced.")
         #     print(f"Learning rate reduced to {optimizer.param_groups[0]['lr']}")
         
+        # Log metrics to TensorBoard
+        
+        
+        writer.add_scalars("loss/epoch", {"train": epoch_loss, "val": val_loss}, epoch)
+        writer.add_scalars("nme/epoch",  {"train": epoch_nme,  "val": val_nme},  epoch)
+        writer.add_scalars("pixel/epoch",{"train": epoch_pixel_error, "val": val_pixel_error}, epoch)
+        writer.add_scalar("opt/lr", optimizer.param_groups[0]['lr'], epoch)
+        
+    # Save the training and validation progress
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    
     # Save the best model (with the lowest validation loss)
     if best_model_state:
         if mirror:
@@ -599,9 +629,16 @@ def main(data_dir, model_name, epochs, learning_rate, batch_size, side, mirror):
         torch.save(best_model_state, model_path)
         print(f"Best model saved to: {model_path}")
 
-    # Save the training and validation progress
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    # Log hyperparameters and metrics to TensorBoard
+    hparam_dict = {"model": model_name, "side": side, "mirror": int(mirror),
+               "epochs": epochs, "lr": learning_rate, "batch_size": batch_size, "image_size": IMAGE_SIZE}
+    metric_dict = {"hparam/best_val_loss": best_val_loss,
+                   "hparam/final_val_loss": val_losses[-1] if len(val_losses) else float('inf'),
+                   "hparam/final_val_nme": val_nmes[-1] if len(val_nmes) else 0.0}
+    writer.add_hparams(hparam_dict, metric_dict)
+
+    writer.flush()
+    writer.close()
 
     # --------------------------------------------------------------plotting--------------------------------------------------------------
     # Save the training progress plot
