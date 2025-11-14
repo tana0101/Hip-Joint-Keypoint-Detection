@@ -3,6 +3,7 @@ torch.serialization.add_safe_globals([argparse.Namespace])
 
 import torch.nn as nn
 import torchvision.models as models
+from .convnextv1.convnext import Block as ConvNeXtBlock, LayerNorm as ConvNeXtLayerNorm
 from .convnextv2.convnextv2 import (
     convnextv2_tiny,
     convnextv2_base,
@@ -872,6 +873,76 @@ class MambaVisionLarge(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+class ConvNeXtV1StemStage0(nn.Module):
+    """
+    使用 convnextv1/convnext.py 的 Block & LayerNorm
+    生成 [B, 128, 112, 112] 的低階特徵圖。
+    修改點：
+      - stem: stride=4  (保留更高解析度)
+      - dim: 128        (增加通道容量)
+    """
+    def __init__(self, in_chans=3, dim=128, depth=3, layer_scale_init_value=1e-6):
+        super().__init__()
+        # ===== Stem =====
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_chans, dim, kernel_size=4, stride=4), # input_size/4
+            ConvNeXtLayerNorm(dim, eps=1e-6, data_format="channels_first")
+        )
+
+        # ===== Stage0 (ConvNeXt Blocks) =====
+        blocks = []
+        for _ in range(depth):
+            blocks.append(
+                ConvNeXtBlock(dim=dim, layer_scale_init_value=layer_scale_init_value)
+            )
+        self.stage0 = nn.Sequential(*blocks)
+
+    def forward(self, x):  # x: [B,3,224,224] → [B,128,112,112]
+        x = self.stem(x)
+        x = self.stage0(x)
+        return x
+
+def _infer_patch_embed_dim(backbone, in_chans=3, probe_size=224):
+    """推斷 backbone patch_embed 的輸出維度"""
+    dummy = torch.randn(1, in_chans, probe_size, probe_size)
+    with torch.no_grad():
+        out = backbone.patch_embed(dummy)
+    return out.shape[1]
+
+class MambaVisionSmallWithConvNeXt(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        backbone = create_model('mamba_vision_S', pretrained=False, model_path="/tmp/mambavision_small_1k.pth.tar")
+        
+        # 將 backbone 的 conv 層替換成 ConvNeXtV1 的 Stem + Stage0
+        dim = _infer_patch_embed_dim(backbone, in_chans=3, probe_size=224)
+        convnext_front = ConvNeXtV1StemStage0(in_chans=3, dim=dim, depth=3, layer_scale_init_value=0)
+        backbone.patch_embed = convnext_front
+        
+        in_features = backbone.head.in_features
+        backbone.head = nn.Linear(in_features, num_points * 2)
+        self.model = backbone
+
+    def forward(self, x):
+        return self.model(x)
+
+class MambaVisionBaseWithConvNeXt(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        backbone = create_model('mamba_vision_B', pretrained=True, model_path="/tmp/mambavision_base_1k.pth.tar")
+        
+        # 將 backbone 的 conv 層替換成 ConvNeXtV1 的 Stem + Stage0
+        dim = _infer_patch_embed_dim(backbone, in_chans=3, probe_size=224)  
+        convnext_front = ConvNeXtV1StemStage0(in_chans=3, dim=dim, depth=3, layer_scale_init_value=0)
+        backbone.patch_embed = convnext_front
+        
+        in_features = backbone.head.in_features
+        backbone.head = nn.Linear(in_features, num_points * 2)
+        self.model = backbone
+
+    def forward(self, x):
+        return self.model(x)
+    
 class ResNet50(nn.Module):
     def __init__(self, num_points):
         super().__init__()
@@ -921,6 +992,8 @@ MODEL = {
     "mambavision_small": MambaVisionSmall,
     "mambavision_base": MambaVisionBase,
     "mambavision_large": MambaVisionLarge,
+    "mambavision_small_convnext": MambaVisionSmallWithConvNeXt,
+    "mambavision_base_convnext": MambaVisionBaseWithConvNeXt,
     "resnet": ResNet50,
     "vgg": VGG19
 }

@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
 import json
+import math
 
 from models.model import initialize_model
 
@@ -485,8 +486,25 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     model.to(device)
 
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    # optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
 
+    # Scheduler: Warm-up + Cosine
+    total_steps = len(train_loader) * epochs
+    warmup_steps = max(1, int(0.1 * total_steps))   # 前 10% steps 線性升溫
+    base_lr = learning_rate
+    min_lr = 1e-6
+    
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return step / float(warmup_steps)                     # 線性 warm-up: 0 -> 1
+        # Cosine decay: 1 -> (min_lr/base_lr)
+        t = (step - warmup_steps) / max(1, (total_steps - warmup_steps))
+        cosine = 0.5 * (1 + math.cos(math.pi * t))               # 1 -> 0
+        return cosine * (1 - min_lr / base_lr) + (min_lr / base_lr)
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    
     # Save the model's training progress
     epoch_losses, epoch_nmes, epoch_pixel_errors = [], [], []
     val_losses, val_nmes, val_pixel_errors = [], [], []
@@ -523,7 +541,8 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-
+            scheduler.step()
+            
             running_loss += loss.item()
 
             preds = outputs.detach().cpu().numpy()
@@ -634,7 +653,7 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
 
     # Log hyperparameters and metrics to TensorBoard
     hparam_dict = {"model": model_name, "side": side, "mirror": int(mirror),
-               "epochs": epochs, "lr": learning_rate, "batch_size": batch_size, "image_size": input_size}
+               "epochs": epochs, "lr": learning_rate, "batch_size": batch_size, "input_size": input_size}
     metric_dict = {"hparam/best_val_loss": best_val_loss,
                    "hparam/final_val_loss": val_losses[-1] if len(val_losses) else float('inf'),
                    "hparam/final_val_nme": val_nmes[-1] if len(val_nmes) else 0.0}
