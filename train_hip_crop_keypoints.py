@@ -446,6 +446,7 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     # 使用鏡像資料擴增
     if mirror:
         opposite_side = "right" if side == "left" else "left"
+        print(f"Preparing mirrored data from {opposite_side} side...")
         opposite_train_dataset = HipCropKeypointDataset(
             img_dir=os.path.join(data_dir, 'train/images'),
             annotation_dir=os.path.join(data_dir, 'train/annotations'),
@@ -624,15 +625,8 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
             best_model_state = model.state_dict()  # Save the model state at the best point
             print(f"Validation loss improved, saving model.")
             
-        # if epoch + 1 == 500:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] *= 0.1
-        #     print(f"[Epoch {epoch+1}] Learning rate manually reduced.")
-        #     print(f"Learning rate reduced to {optimizer.param_groups[0]['lr']}")
-        
+
         # Log metrics to TensorBoard
-        
-        
         writer.add_scalars("loss/epoch", {"train": epoch_loss, "val": val_loss}, epoch)
         writer.add_scalars("nme/epoch",  {"train": epoch_nme,  "val": val_nme},  epoch)
         writer.add_scalars("pixel/epoch",{"train": epoch_pixel_error, "val": val_pixel_error}, epoch)
@@ -667,9 +661,9 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     epochs_range = range(1, epochs + 1)
     plot_training_progress(
         epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors,
-        loss_ylim=(0, 300),
-        nme_ylim=(0, 0.02),
-        pixel_error_ylim=(0, 200),
+        loss_ylim=(0.01, 50),
+        nme_ylim=(0.0001, 0.02),
+        pixel_error_ylim=(0.01, 50),
     )
 
     # Save the training plot
