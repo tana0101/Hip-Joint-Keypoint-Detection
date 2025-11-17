@@ -39,8 +39,8 @@ class BlockD(nn.Module):
         self.pwconv2 = nn.Linear(4 * dim, dim)
         self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)), 
                                     requires_grad=True) if layer_scale_init_value > 0 else None
-        self.ffn_drop = nn.Dropout(p=0.1) # Feed-Forward Network Dropout
-        self.se = SE(4 * dim)
+        # self.ffn_drop = nn.Dropout(p=0.1) # Feed-Forward Network Dropout
+        self.se = SE(dim)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity() 
         
         
@@ -51,9 +51,9 @@ class BlockD(nn.Module):
         x = self.norm(x)
         x = self.pwconv1(x)
         x = self.act(x)
-        x = self.ffn_drop(x)
-        x = self.se(x)
+        # x = self.ffn_drop(x)
         x = self.pwconv2(x)
+        x = self.se(x)
         if self.gamma is not None:
             x = self.gamma * x
         x = x.permute(0, 3, 1, 2) # (N, H, W, C) -> (N, C, H, W)
