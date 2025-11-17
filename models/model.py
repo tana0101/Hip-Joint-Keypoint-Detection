@@ -3,13 +3,25 @@ torch.serialization.add_safe_globals([argparse.Namespace])
 
 import torch.nn as nn
 import torchvision.models as models
+
 from .convnextv1.convnext import Block as ConvNeXtBlock, LayerNorm as ConvNeXtLayerNorm
+import models.convnextv1.convnext_custom as convnext_custom # 匯入我設計的 convnext_custom 模組
+
 from .convnextv2.convnextv2 import (
     convnextv2_tiny,
     convnextv2_base,
     convnextv2_large
 )
+
 from mambavision import create_model
+
+from functools import partial
+from .inceptionnext.inceptionnext import (
+    inceptionnext_tiny,
+    inceptionnext_small,
+    inceptionnext_small_k7,
+    inceptionnext_base
+)
 
 class EfficientNetWithTransformer(nn.Module):
     def __init__(self, num_points: int, image_size: int = 224,
@@ -792,6 +804,38 @@ class ConvNeXtLarge(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+class ConvNeXtSmallCustom(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = convnext_custom.ConvNeXt(depths=[3, 3, 27, 3], dims=[96, 192, 384, 768], block_cls=convnext_custom.BlockD)
+        url = convnext_custom.model_urls['convnext_small_1k']
+        checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+        
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, num_points * 2)
+        self.model = model
+
+    def forward(self, x):
+        return self.model(x)
+    
+class ConvNeXtSmallMS(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        backbone = convnext_custom.convnext_small(pretrained=True)
+        model = convnext_custom.ConvNeXtFlexible(
+            backbone=backbone,
+            mode="fpn",
+            fpn_levels=(1, 2, 3), # 使用 stage3, stage4, stage5
+            fpn_out_channels=256,
+            fpn_fuse_type="concat",
+            num_classes=num_points * 2
+        )
+        self.model = model
+        
+    def forward(self, x):
+        return self.model(x)
+
 class ConvNeXtV2Tiny(nn.Module):
     def __init__(self, num_points):
         super().__init__()
@@ -942,7 +986,77 @@ class MambaVisionBaseWithConvNeXt(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+# class KeypointHead(nn.Module):
+#     def __init__(self, dim, num_points):
+#         super().__init__()
+#         self.fc = nn.Linear(dim, num_points * 2)
+
+#     def forward(self, x):
+#         x = x.mean((2, 3))  # [B, C] global average pooling
+#         return self.fc(x)   # [B, num_points * 2]
+
+class KeypointHead(nn.Module):
+    def __init__(self, dim, num_points, drop=0.0):
+        super().__init__()
+        self.gap = nn.AdaptiveAvgPool2d(1)  # 和 convnext 一樣先變 [B, C, 1, 1]
+        self.norm = nn.LayerNorm(dim)       # 對 channel 做 LN
+        self.drop = nn.Dropout(drop) if drop > 0 else nn.Identity()
+        self.fc = nn.Linear(dim, num_points * 2)
+
+    def forward(self, x):
+        # x: [B, C, H, W]
+        x = self.gap(x)            # [B, C, 1, 1]
+        x = x.squeeze(-1).squeeze(-1)  # [B, C]
+        x = self.norm(x)           # [B, C]
+        x = self.drop(x)
+        return self.fc(x)          # [B, 2K]
+
+class KeypointMLPHead(nn.Module):
+    def __init__(self, dim, num_points, hidden_ratio=3, drop=0.0):
+        super().__init__()
+        hidden_dim = int(dim * hidden_ratio)
+        self.gap = nn.AdaptiveAvgPool2d(1)
+        self.fc1 = nn.Linear(dim, hidden_dim)
+        self.act = nn.GELU()
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.drop = nn.Dropout(drop) if drop > 0 else nn.Identity()
+        self.fc2 = nn.Linear(hidden_dim, num_points * 2)
+
+    def forward(self, x):
+        x = self.gap(x).squeeze(-1).squeeze(-1)  # [B, C]
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.norm(x)
+        x = self.drop(x)
+        return self.fc2(x)
+
+class InceptionNextSmall(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = inceptionnext_small(pretrained=True)
+        
+        in_features = model.num_features
+        model.head = KeypointHead(in_features, num_points)
+
+        self.model = model
     
+    def forward(self, x):
+        return self.model(x)
+
+class InceptionNextSmall_K7(nn.Module):
+    def __init__(self, num_points):
+        super().__init__()
+        model = inceptionnext_small_k7(pretrained=True)
+        
+        in_features = model.num_features
+        model.head = KeypointHead(in_features, num_points)
+
+        self.model = model
+    
+    def forward(self, x):
+        return self.model(x)
+
 class ResNet50(nn.Module):
     def __init__(self, num_points):
         super().__init__()
@@ -968,6 +1082,9 @@ class VGG19(nn.Module):
         return self.model(x)
 
 MODEL = {
+    
+    # 基於 pyTorch 實作的 EfficientNetV2 系列模型。
+    
     "efficientnet": EfficientNet,
     "efficientnet_FC2048": EfficientNet_FC2048,
     "efficientnet_transformer": EfficientNetWithTransformer,
@@ -980,20 +1097,38 @@ MODEL = {
     "efficientnet_ms_cbam_3scales_gated": EfficientNetMultiScaleCBAM_3scales_GatedFusion,
     "efficientnet_ms_cbam_3scales_gapconcat": EfficientNetMultiScaleCBAM_3scales_GAPConcat,
     "efficientnet_ms_3scales_cross_attn": EfficientNetMultiScale_3scales_CrossAttn,
+
+    # 基於 pyTorch 實作的 ConvNeXt 系列模型。
+    
     "convnext_tiny": ConvNeXtTiny,
     "convnext": ConvNeXtSmall,
     "convnext_base": ConvNeXtBase,
     "convnext_large": ConvNeXtLarge,
     "convnext_cbam": ConvNeXtWithCBAM,
     "convnext_transformer": ConvNeXtWithTransformer,
+    
+    # 基於官方實作的 ConvNeXt 系列模型。
+    
+    "convnext_small_ms": ConvNeXtSmallMS, # 基於官方庫實作的 Multi-Scale ConvNeXt-Small
+    "convnext_small_custom": ConvNeXtSmallCustom,
     "convnext_v2_tiny": ConvNeXtV2Tiny,
     "convnext_v2_base": ConvNeXtV2Base,
     "convnext_v2_large": ConvNeXtV2Large,
+    
+    # MambaVision 系列模型。
+    
     "mambavision_small": MambaVisionSmall,
     "mambavision_base": MambaVisionBase,
     "mambavision_large": MambaVisionLarge,
     "mambavision_small_convnext": MambaVisionSmallWithConvNeXt,
     "mambavision_base_convnext": MambaVisionBaseWithConvNeXt,
+    
+    # InceptionNext 系列模型。
+    
+    "inceptionnext_small": InceptionNextSmall,
+    "inceptionnext_small_k7": InceptionNextSmall_K7,
+    
+    # 其他經典模型。
     "resnet": ResNet50,
     "vgg": VGG19
 }
