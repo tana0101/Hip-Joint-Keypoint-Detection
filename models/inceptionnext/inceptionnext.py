@@ -354,29 +354,6 @@ def inceptionnext_small(pretrained=False, **kwargs):
         model.load_state_dict(state_dict)
     return model
 
-# New model with kernel size 7
-@register_model
-def inceptionnext_small_k7(pretrained=False, **kwargs):
-    model = MetaNeXt(depths=(3, 3, 27, 3), dims=(96, 192, 384, 768), 
-                      token_mixers=partial(InceptionDWConv2d, square_kernel_size=7),
-                      **kwargs
-    )
-    model.default_cfg = default_cfgs['inceptionnext_small']
-    if pretrained:
-        state_dict = torch.hub.load_state_dict_from_url(
-            url=model.default_cfg['url'], map_location="cpu", check_hash=True)
-        model_state = model.state_dict()
-        
-        # 只保留形狀完全一樣的權重
-        filtered_state_dict = {
-            k: v for k, v in state_dict.items()
-            if k in model_state and v.shape == model_state[k].shape
-        }
-        
-        model_state.update(filtered_state_dict)
-        model.load_state_dict(model_state)
-    return model
-
 @register_model
 def inceptionnext_base(pretrained=False, **kwargs):
     model = MetaNeXt(depths=(3, 3, 27, 3), dims=(128, 256, 512, 1024), 
