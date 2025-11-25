@@ -13,6 +13,8 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_s
 from scipy.stats import pearsonr, spearmanr, kendalltau
 from ultralytics import YOLO
 
+from utils.simcc import decode_simcc_to_xy
+
 from models.model import initialize_model
 
 POINTS_COUNT = 6
@@ -47,21 +49,50 @@ def _detect_one(yolo_model, pil_img, cls_id, conf=0.05, iou=0.5):
     xyxy = res[0].boxes.xyxy[0].cpu().numpy().tolist()  # [x1,y1,x2,y2]
     return tuple(float(v) for v in xyxy)
 
-def _infer_side_kp(kp_model, pil_crop, transform, crop_box, input_size):
-    """對單側裁切圖做前處理→預測→轉回原圖座標系 (回傳 shape=(6,2) 的 numpy)。"""
+def _infer_side_kp(
+    kp_model,
+    pil_crop,
+    transform,
+    crop_box,
+    input_size,
+    head_type="direct_regression",
+    Nx=None,
+    Ny=None,
+):
+    """
+    對單側裁切圖做前處理→預測→轉回原圖座標系 (回傳 shape=(6,2) 的 numpy)。
+
+    head_type:
+      - "direct_regression": kp_model(crop_tensor) → [B, 2*K]
+      - "simcc":             kp_model(crop_tensor) → (pred_x, pred_y)，再 decode 成 [B, 2*K]
+    """
     x1, y1, x2, y2 = crop_box
     crop_w, crop_h = (x2 - x1), (y2 - y1)
+
     # 前處理（與訓練一致）
-    crop_tensor = transform(pil_crop).unsqueeze(0)   # [1,3,224,224]
-    
+    crop_tensor = transform(pil_crop).unsqueeze(0)   # [1,3,input_size,input_size]
+
     # 取得模型所在裝置，並把輸入搬到同裝置
     device = next(kp_model.parameters()).device
     crop_tensor = crop_tensor.to(device, non_blocking=True)
-    
+
     with torch.inference_mode():
-        pred = kp_model(crop_tensor).detach().cpu().numpy().reshape(-1, 2)  # (6,2) in 224x224
-    
-    # 反映射回原圖
+        if head_type == "simcc":
+            # SimCC: model 回傳 (pred_x, pred_y)
+            pred_x, pred_y = kp_model(crop_tensor)          # [1, K, Nx], [1, K, Ny]
+            coords = decode_simcc_to_xy(
+                pred_x, pred_y,
+                Nx=Nx,
+                Ny=Ny,
+                input_size=input_size,
+            )                                               # [1, 2*K]
+            pred = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
+        else:
+            # direct_regression: model 直接輸出 [B, 2*K]
+            coords = kp_model(crop_tensor)                  # [1, 2*K]
+            pred = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
+
+    # 反映射回原圖座標
     sx, sy = crop_w / input_size, crop_h / input_size
     pred_orig = np.empty_like(pred)
     pred_orig[:, 0] = pred[:, 0] * sx + x1
@@ -81,37 +112,63 @@ def _reorder_between_sides(kpts_6x2, from_side, to_side):
         return kpts_6x2
     return kpts_6x2[REORDER_6, :]
 
-def _infer_via_mirror(kp_model, pil_crop_src, transform, crop_box, model_side, target_side, input_size):
+def _infer_via_mirror(
+    kp_model,
+    pil_crop_src,
+    transform,
+    crop_box,
+    model_side,
+    target_side,
+    input_size,
+    head_type="direct_regression",
+    Nx=None,
+    Ny=None,
+):
     """
     單模型模式：把 'target_side' 的裁切圖鏡像成 'model_side' 外觀 → 用該模型推論 →
-    在 224 空間反鏡像回來 → 做 from=model_side → to=target_side 的索引重排 → 反投影回原圖。
+    在 input_size 空間反鏡像回來 → 做 from=model_side → to=target_side 的索引重排 → 反投影回原圖。
     回傳 (6,2) numpy（target_side 的順序）。
     """
     # 1) 目標側裁切 → 鏡像成模型側外觀
     pil_mirror = ImageOps.mirror(pil_crop_src)  # 水平鏡像
 
-    # 2) 模型在鏡像空間推論（得到 model_side 順序，座標=224）
+    # 2) 模型在鏡像空間推論（得到 model_side 順序，座標= input_size x input_size）
     crop_tensor = transform(pil_mirror).unsqueeze(0)
-    # 取得模型所在裝置，並把輸入搬到同裝置
     device = next(kp_model.parameters()).device
     crop_tensor = crop_tensor.to(device, non_blocking=True)
-    
-    with torch.inference_mode():
-        pred_model_224 = kp_model(crop_tensor).detach().cpu().numpy().reshape(-1, 2)  # (6,2) in 224x224
 
-    # 3) 224 空間反鏡像回未鏡像空間
-    pred_unflipped_224 = _hflip_kpts_224(pred_model_224, input_size)
+    with torch.inference_mode():
+        if head_type == "simcc":
+            pred_x, pred_y = kp_model(crop_tensor)          # [1, K, Nx], [1, K, Ny]
+            coords = decode_simcc_to_xy(
+                pred_x, pred_y,
+                Nx=Nx,
+                Ny=Ny,
+                input_size=input_size,
+            )                                               # [1, 2*K]
+            pred_model_input = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
+        else:
+            coords = kp_model(crop_tensor)                  # [1, 2*K]
+            pred_model_input = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
+
+    # 3) input_size 空間反鏡像回未鏡像空間
+    pred_unflipped = _hflip_kpts_224(pred_model_input, input_size)
 
     # 4) 索引重排：model_side → target_side
-    pred_target_224 = _reorder_between_sides(pred_unflipped_224, from_side=model_side, to_side=target_side)
+    pred_target_in = _reorder_between_sides(
+        pred_unflipped,
+        from_side=model_side,
+        to_side=target_side,
+    )
 
-    # 5) 反投影回原圖
+    # 5) 反投影回原圖座標
     x1, y1, x2, y2 = crop_box
     crop_w, crop_h = (x2 - x1), (y2 - y1)
     sx, sy = crop_w / input_size, crop_h / input_size
-    pred_target_orig = np.empty_like(pred_target_224)
-    pred_target_orig[:, 0] = pred_target_224[:, 0] * sx + x1
-    pred_target_orig[:, 1] = pred_target_224[:, 1] * sy + y1
+
+    pred_target_orig = np.empty_like(pred_target_in)
+    pred_target_orig[:, 0] = pred_target_in[:, 0] * sx + x1
+    pred_target_orig[:, 1] = pred_target_in[:, 1] * sy + y1
     return pred_target_orig
 
 # Load annotations from CSV file
@@ -127,27 +184,78 @@ def calculate_avg_distance(predicted_keypoints, original_keypoints):
     return avg_distance
 
 def extract_info_from_model_path(model_path):
-    # 嘗試匹配包含 input_size 的版本: _<input_size>_<epochs>_<lr>_<batch>_best.pth
-    match_with_input = re.search(r'_(\d+)_([0-9]+)_([0-9eE\.\-]+)_([0-9]+)_best\.pth', model_path)
-    if match_with_input:
-        input_size = int(match_with_input.group(1))
-        epochs = int(match_with_input.group(2))
-        learning_rate = float(match_with_input.group(3))
-        batch_size = int(match_with_input.group(4))
-        return input_size, epochs, learning_rate, batch_size
+    """
+    支援兩種命名：
+      simcc:
+        model_simcc_sr2.0_sigma6.0_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
+      direct_regression:
+        model_direct_regression_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
 
-    # 匹配不含 input_size 的版本: _<epochs>_<lr>_<batch>_best.pth
-    match_without_input = re.search(r'_(\d+)_([0-9eE\.\-]+)_(\d+)_best\.pth', model_path)
-    if match_without_input:
-        input_size = 224 # 預設值
-        epochs = int(match_without_input.group(1))
-        learning_rate = float(match_without_input.group(2))
-        batch_size = int(match_without_input.group(3))
-        return input_size, epochs, learning_rate, batch_size
+    回傳：
+      input_size : int
+      epochs     : int
+      learning_rate : float
+      batch_size : int
+      split_ratio: float or None  (simcc 有值, direct_regression 為 None)
+    """
+    filename = os.path.basename(model_path)
 
-    # 都不符合時報錯
-    raise ValueError("Model path format is invalid. Expected format like: "
-                     "model_name_[input_size_]epochs_lr_batchsize_best.pth")
+    # 1) 先試 simcc 有 sr 的版本
+    #    model_simcc_sr2.0_sigma6.0_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
+    pattern_simcc = re.compile(
+        r'_simcc_sr([0-9eE\.\-]+)'        # sr2.0 -> 捕捉 "2.0"
+        r'_sigma([0-9eE\.\-]+)'           # sigma6.0 -> 捕捉 "6.0"
+        r'_crop(left|right)'              # _cropleft or _cropright
+        r'(?:_mirror)?'                   # 可選的 _mirror
+        r'_(\d+)'                         # input_size
+        r'_([0-9]+)'                      # epochs
+        r'_([0-9eE\.\-]+)'                # learning_rate
+        r'_([0-9]+)'                      # batch_size
+        r'(?:_best\.pth)?$'               # 可選的 _best.pth 結尾
+    )
+
+    m = pattern_simcc.search(filename)
+    if m:
+        split_ratio   = float(m.group(1))
+        sigma         = float(m.group(2))
+        # side          = m.group(3)
+        input_size    = int(m.group(4))
+        epochs        = int(m.group(5))
+        learning_rate = float(m.group(6))
+        batch_size    = int(m.group(7))
+        return input_size, epochs, learning_rate, batch_size, split_ratio, sigma
+
+    # 2) 再試 direct_regression 的版本
+    #    model_direct_regression_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
+    pattern_dr = re.compile(
+        r'_direct_regression'
+        r'_crop(left|right)'              # _cropleft or _cropright
+        r'(?:_mirror)?'                   # 可選的 _mirror
+        r'_(\d+)'                         # input_size
+        r'_([0-9]+)'                      # epochs
+        r'_([0-9eE\.\-]+)'                # learning_rate
+        r'_([0-9]+)'                      # batch_size
+        r'(?:_best\.pth)?$'               # 可選的 _best.pth
+    )
+
+    m2 = pattern_dr.search(filename)
+    if m2:
+        # side = m2.group(1)
+        input_size    = int(m2.group(2))
+        epochs        = int(m2.group(3))
+        learning_rate = float(m2.group(4))
+        batch_size    = int(m2.group(5))
+        split_ratio   = None  # direct_regression 沒有 sr
+        sigma         = None
+        return input_size, epochs, learning_rate, batch_size, split_ratio, sigma
+
+    # 3) 都沒 match 就報錯
+    raise ValueError(
+        f"Model path format is invalid: {filename}\n"
+        "Expected something like:\n"
+        "  model_simcc_sr2.0_cropleft_448_300_0.0001_32[_best.pth]\n"
+        "  model_direct_regression_cropleft_448_300_0.0001_32[_best.pth]"
+    )
 
 def draw_hilgenreiner_line(ax, p3, p7):
     if np.allclose(p3[0], p7[0]):
@@ -539,35 +647,70 @@ def add_zscore_right_axis(ax, mu, std):
     
 def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir):
     
-    # 1) 載入 YOLO + KP 模型（左右可能有其一缺省）
-    yolo_model = YOLO(yolo_weights)
-    
+    # 0) 以存在的模型路徑擷取紀錄資訊
     use_left  = (kp_left_path  is not None) and (str(kp_left_path).strip()  != "")
     use_right = (kp_right_path is not None) and (str(kp_right_path).strip() != "")
     assert use_left or use_right, "至少提供 --kp_left_path 或 --kp_right_path 其中之一"
     
+    ref_model_path = kp_left_path if use_left else kp_right_path
+    input_size, epochs, learning_rate, batch_size, split_ratio, sigma = extract_info_from_model_path(ref_model_path)
+    print(f"Model info extracted from path:\n"
+          f"  input_size    : {input_size}\n"
+          f"  epochs        : {epochs}\n"
+          f"  learning_rate : {learning_rate}\n"
+          f"  batch_size    : {batch_size}\n"
+          f"  split_ratio   : {split_ratio}\n"
+          f"  sigma         : {sigma}"
+         )
+    
+    if split_ratio is not None:
+        head_type = "simcc"
+        Nx = int(input_size * split_ratio)
+        Ny = int(input_size * split_ratio)
+    else:
+        head_type = "direct_regression"
+        Nx = Ny = None
+    
+    # 1) 載入 YOLO + KP 模型（左右可能有其一缺省）
+    yolo_model = YOLO(yolo_weights)
+    
     kp_left = kp_right = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     if use_left:
-        kp_left = initialize_model(model_name, POINTS_COUNT)
+        kp_left = initialize_model(
+            model_name,
+            POINTS_COUNT,
+            head_type=head_type,
+            Nx=Nx,
+            Ny=Ny,
+        )
         kp_left.load_state_dict(torch.load(kp_left_path, map_location="cpu"))
         kp_left.to(device)
         kp_left.eval()
+
     if use_right:
-        kp_right = initialize_model(model_name, POINTS_COUNT)
+        kp_right = initialize_model(
+            model_name,
+            POINTS_COUNT,
+            head_type=head_type,
+            Nx=Nx,
+            Ny=Ny,
+        )
         kp_right.load_state_dict(torch.load(kp_right_path, map_location="cpu"))
         kp_right.to(device)
         kp_right.eval()
-    
-    # 以存在的模型路徑擷取紀錄資訊
-    input_size, epochs, learning_rate, batch_size = extract_info_from_model_path(kp_left_path if use_left else kp_right_path)
 
     # 2) 建結果資料夾
     crop_side = "both-sides" if use_left and use_right else ("left-only" if use_left else "right-only")
-    result_dir = os.path.join(output_dir, f"{model_name}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}")
+    if head_type == "simcc":
+        exp_name = f"{model_name}_{head_type}_sr{split_ratio}_sigma{sigma}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}"
+    else:
+        exp_name = f"{model_name}_{head_type}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}"
+    result_dir = os.path.join(output_dir, exp_name)
     os.makedirs(result_dir, exist_ok=True)
 
-    # NEW: 建立裁切輸出資料夾
+    # 建立裁切輸出資料夾
     crops_dir = os.path.join(result_dir, "crops")
     crops_left_dir  = os.path.join(crops_dir, "left")
     crops_right_dir = os.path.join(crops_dir, "right")
@@ -638,11 +781,30 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
 
             if use_left:
                 # 有左模型：直接推左
-                pred_left_6 = _infer_side_kp(kp_left, crop_left, transform, (x1,y1,x2,y2), input_size)
+                pred_left_6 = _infer_side_kp(
+                    kp_left,
+                    crop_left,
+                    transform,
+                    (x1,y1,x2,y2),
+                    input_size,
+                    head_type=head_type,
+                    Nx=Nx,
+                    Ny=Ny,
+                )
             else:
                 # 沒左模型、只有右模型：把左鏡像成右 → 用右模型 → 反鏡像 + 重排回左
-                pred_left_6 = _infer_via_mirror(kp_right, crop_left, transform, (x1,y1,x2,y2),
-                                                model_side="right", target_side="left", input_size=input_size)
+                pred_left_6 = _infer_via_mirror(
+                    kp_right,
+                    crop_left,
+                    transform,
+                    (x1,y1,x2,y2),
+                    model_side="right",
+                    target_side="left",
+                    input_size=input_size,
+                    head_type=head_type,
+                    Nx=Nx,
+                    Ny=Ny,
+                )
 
             # Right
             x1,y1,x2,y2 = box_right
@@ -653,11 +815,30 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
 
             if use_right:
                 # 有右模型：直接推右
-                pred_right_6 = _infer_side_kp(kp_right, crop_right, transform, (x1,y1,x2,y2), input_size)
+                pred_right_6 = _infer_side_kp(
+                    kp_right,
+                    crop_right,
+                    transform,
+                    (x1,y1,x2,y2),
+                    input_size,
+                    head_type=head_type,
+                    Nx=Nx,
+                    Ny=Ny,
+                )
             else:
                 # 沒右模型、只有左模型：把右鏡像成左 → 用左模型 → 反鏡像 + 重排回右
-                pred_right_6 = _infer_via_mirror(kp_left, crop_right, transform, (x1,y1,x2,y2),
-                                                 model_side="left", target_side="right", input_size=input_size)
+                pred_right_6 = _infer_via_mirror(
+                    kp_left,
+                    crop_right,
+                    transform,
+                    (x1,y1,x2,y2),
+                    model_side="left",
+                    target_side="right",
+                    input_size=input_size,
+                    head_type=head_type,
+                    Nx=Nx,
+                    Ny=Ny,
+                )
 
             
             # 合併成 12 點 (前6=Left, 後6=Right)
@@ -873,9 +1054,5 @@ if __name__ == "__main__":
         args.output_dir
     )
 
-# 左右雙模型預測
-# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_750_0.0001_32_best.pth --kp_right_path models/convnext_cropright_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
-# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_mirror_750_0.0001_32_best.pth --kp_right_path models/convnext_cropright_mirror_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
 # 單側模型預測
-# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path models/convnext_cropleft_mirror_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
-# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_right_path models/convnext_cropright_mirror_750_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
+# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path weights/convnext_direct_regression_cropleft_mirror_224_300_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"

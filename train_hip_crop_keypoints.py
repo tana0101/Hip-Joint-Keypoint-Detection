@@ -2,6 +2,7 @@ import os
 import argparse
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import models, transforms
 import torchvision.transforms.functional as TF
@@ -16,6 +17,16 @@ import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
 import json
 import math
+
+from utils.simcc import (
+    compute_loss_simcc,
+    simcc_label_encoder,
+    decode_simcc_to_xy,
+    simcc_loss_fn,
+    SimCCLoss
+)
+
+from utils.regression import compute_loss_direct_regression
 
 from models.model import initialize_model
 
@@ -328,23 +339,6 @@ def display_image(dataset, index):
 
     plt.show()
 
-def extend_with_center_points_side(outputs, keypoints):
-    """
-    outputs/keypoints: [B, 12] 對應 6 點 (x,y)
-    回傳:
-      outputs_ext/keypoints_ext: [B, 7, 2]
-    """
-    outputs = outputs.view(-1, POINTS_COUNT, 2)    # (B,6,2)
-    keypoints = keypoints.view(-1, POINTS_COUNT, 2)
-
-    center_output = torch.mean(outputs, dim=1, keepdim=True)     # (B,1,2)
-    center_keypts = torch.mean(keypoints, dim=1, keepdim=True)   # (B,1,2)
-
-    outputs_extended = torch.cat([outputs, center_output], dim=1)    # (B,7,2)
-    keypoints_extended = torch.cat([keypoints, center_keypts], dim=1)
-
-    return outputs_extended, keypoints_extended
-
 def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors, 
                            title_suffix="", start_epoch=1, loss_ylim=None, nme_ylim=None, pixel_error_ylim=None):
     """
@@ -379,7 +373,7 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
     plt.subplot(1, 3, 1)
     plt.plot(epochs_range, epoch_losses, label="Training Loss")
     plt.plot(epochs_range, val_losses, label="Validation Loss")
-    plt.title(f"Loss(MSE){title_suffix}")
+    plt.title(f"Loss{title_suffix}")
     plt.xlabel("Epoch")
     plt.ylabel("Loss (log)")
     plt.yscale('log')  # Log scale
@@ -413,7 +407,41 @@ def plot_training_progress(epochs_range, epoch_losses, val_losses, epoch_nmes, v
 
     plt.tight_layout()
 
-def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror):
+def build_experiment_name(
+    model_name: str,
+    head_type: str,
+    side: str,
+    mirror: bool,
+    input_size: int,
+    epochs: int,
+    learning_rate: float,
+    batch_size: int,
+    split_ratio: float | None = None,
+    sigma: float | None = None,
+) -> str:
+    """
+    統一產生實驗 / 檔名用的 base name，不含副檔名。
+    規則：
+      simcc: model_simcc_sr2.0_sigma6.0_cropleft[_mirror]_448_300_0.0001_32
+      direct_regression: model_direct_regression_cropleft[_mirror]_448_300_0.0001_32
+    """
+    base = f"{model_name}_{head_type}"
+
+    # 只有 simcc 才會加 sr 跟 sigma
+    if head_type == "simcc" and split_ratio is not None:
+        base += f"_sr{split_ratio}"
+    if head_type == "simcc" and sigma is not None:
+        base += f"_sigma{sigma}"
+
+    base += f"_crop{side}"
+    if mirror:
+        base += "_mirror"
+
+    # 統一後面這四個
+    base += f"_{input_size}_{epochs}_{learning_rate}_{batch_size}"
+    return base
+
+def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror, head_type="direct_regression", split_ratio=2, sigma=6.0):
     transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=3),
         transforms.Lambda(lambda img: ImageOps.equalize(img)),
@@ -482,14 +510,36 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     print(f"[{side.upper()}] Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
     
     # Initialize the model, loss function, and optimizer
-    model = initialize_model(model_name, POINTS_COUNT)  # 你的 initialize_model 需維持回傳 12 維輸出 (6*2)
+    if head_type == "simcc":
+        Nx = int(input_size * split_ratio)
+        Ny = int(input_size * split_ratio)
+    else:
+        Nx = None
+        Ny = None
+    model = initialize_model(model_name, POINTS_COUNT, head_type=head_type, Nx=Nx, Ny=Ny)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    criterion = nn.MSELoss()
-    # optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    if head_type == "direct_regression":
+        def loss_fn(outputs, keypoints):
+            criterion = nn.MSELoss()
+            return compute_loss_direct_regression(outputs, keypoints, criterion)
+    elif head_type == "simcc":
+        def loss_fn(outputs, keypoints):
+            return compute_loss_simcc(
+                outputs,
+                keypoints,
+                Nx=Nx,
+                Ny=Ny,
+                input_size=input_size,
+                sigma=sigma,
+                simcc_label_encoder=simcc_label_encoder,
+                simcc_loss_fn=simcc_loss_fn,
+            )
+    else:
+        raise ValueError(f"Unknown head_type: {head_type}")
+    
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
-
     # Scheduler: Warm-up + Cosine
     total_steps = len(train_loader) * epochs
     warmup_steps = max(1, int(0.1 * total_steps))   # 前 10% steps 線性升溫
@@ -509,10 +559,22 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     # Save the model's training progress
     epoch_losses, epoch_nmes, epoch_pixel_errors = [], [], []
     val_losses, val_nmes, val_pixel_errors = [], [], []
-    best_val_loss, best_model_state = float('inf'), None
+    best_val_pixel_error, best_model_state = float('inf'), None
 
     # TensorBoard writer
-    run_name = f"{model_name}_crop{side}" + ("_mirror" if mirror else "") + f"_{input_size}_{epochs}_{learning_rate}_{batch_size}"
+    exp_name = build_experiment_name(
+        model_name=model_name,
+        head_type=head_type,
+        side=side,
+        mirror=mirror,
+        input_size=input_size,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        split_ratio=split_ratio,
+        sigma=sigma,
+    )
+    run_name = exp_name
     tb_dir = os.path.join(LOGS_DIR, "tb", run_name)
     writer = SummaryWriter(log_dir=tb_dir)
     try:
@@ -534,11 +596,8 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
             optimizer.zero_grad()
             outputs = model(images)  # (B, 12) for 6 points
 
-            # Combine the center points with the original outputs and keypoints
-            outputs_extended, keypoints_extended = extend_with_center_points_side(outputs, keypoints)
-
-            # Calculate loss using the extended tensors
-            loss = criterion(outputs_extended, keypoints_extended)
+            # Calculate loss
+            loss = loss_fn(outputs, keypoints)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -546,7 +605,12 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
             
             running_loss += loss.item()
 
-            preds = outputs.detach().cpu().numpy()
+            if head_type == "direct_regression":
+                preds = outputs.detach().cpu().numpy()
+            elif head_type == "simcc":
+                pred_x, pred_y = outputs
+                preds = decode_simcc_to_xy(pred_x, pred_y, Nx=Nx, Ny=Ny, input_size=input_size)
+                preds = preds.detach().cpu().numpy()
             targets = keypoints.detach().cpu().numpy()
             
             # Unpack the original image sizes
@@ -586,16 +650,18 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
 
                 outputs = model(images)
 
-                # Combine the center points with the original outputs and keypoints
-                outputs_extended, keypoints_extended = extend_with_center_points_side(outputs, keypoints)
-
-                # Calculate loss using the extended tensors
-                loss = criterion(outputs_extended, keypoints_extended)
+                # Calculate loss
+                loss = loss_fn(outputs, keypoints)
                 val_loss += loss.item()
 
-                preds = outputs.cpu().detach().numpy()
-                targets = keypoints.cpu().numpy()
-        
+                if head_type == "direct_regression":
+                    preds = outputs.detach().cpu().numpy()
+                elif head_type == "simcc":
+                    pred_x, pred_y = outputs
+                    preds = decode_simcc_to_xy(pred_x, pred_y, Nx=Nx, Ny=Ny, input_size=input_size)
+                    preds = preds.detach().cpu().numpy()
+                targets = keypoints.detach().cpu().numpy()
+                
                 # Unpack the original image sizes
                 widths, heights = crop_sizes
                 widths = widths.cpu().numpy()  
@@ -620,12 +686,11 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
         print(f"Validation Loss: {val_loss:.4f} | NME: {val_nme:.4f} | Pixel: {val_pixel_error:.4f}")
 
         # Save the model with the best validation loss
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_pixel_error < best_val_pixel_error:
+            best_val_pixel_error = val_pixel_error
             best_model_state = model.state_dict()  # Save the model state at the best point
-            print(f"Validation loss improved, saving model.")
-            
-
+            print(f"---------------- Validation pixel error improved to {best_val_pixel_error:.4f}, saving model. ----------------")
+             
         # Log metrics to TensorBoard
         writer.add_scalars("loss/epoch", {"train": epoch_loss, "val": val_loss}, epoch)
         writer.add_scalars("nme/epoch",  {"train": epoch_nme,  "val": val_nme},  epoch)
@@ -638,17 +703,24 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     
     # Save the best model (with the lowest validation loss)
     if best_model_state:
-        if mirror:
-            model_path = f"{MODELS_DIR}/{model_name}_crop{side}_mirror_{input_size}_{epochs}_{learning_rate}_{batch_size}_best.pth"
-        else:
-            model_path = f"{MODELS_DIR}/{model_name}_crop{side}_{input_size}_{epochs}_{learning_rate}_{batch_size}_best.pth"
+        model_path = os.path.join(MODELS_DIR, f"{exp_name}_best.pth")
         torch.save(best_model_state, model_path)
         print(f"Best model saved to: {model_path}")
 
     # Log hyperparameters and metrics to TensorBoard
-    hparam_dict = {"model": model_name, "side": side, "mirror": int(mirror),
-               "epochs": epochs, "lr": learning_rate, "batch_size": batch_size, "input_size": input_size}
-    metric_dict = {"hparam/best_val_loss": best_val_loss,
+    hparam_dict = {
+        "model": model_name,
+        "head_type": head_type,
+        "sr": split_ratio if head_type == "simcc" else 1.0,
+        "sigma": sigma if head_type == "simcc" else None,
+        "side": side,
+        "mirror": int(mirror),
+        "epochs": epochs,
+        "lr": learning_rate,
+        "batch_size": batch_size,
+        "input_size": input_size,
+    }
+    metric_dict = {"hparam/best_val_pixel_error": best_val_pixel_error,
                    "hparam/final_val_loss": val_losses[-1] if len(val_losses) else float('inf'),
                    "hparam/final_val_nme": val_nmes[-1] if len(val_nmes) else 0.0}
     writer.add_hparams(hparam_dict, metric_dict)
@@ -667,19 +739,13 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     )
 
     # Save the training plot
-    if mirror:
-        training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_crop{side}_mirror_{input_size}_{epochs}_{learning_rate}_{batch_size}.png"
-    else:
-        training_plot_path = f"{LOGS_DIR}/{model_name}_training_plot_crop{side}_{input_size}_{epochs}_{learning_rate}_{batch_size}.png"
+    training_plot_path = os.path.join(LOGS_DIR, f"{exp_name}_training_plot.png")
     plt.savefig(training_plot_path)
     print(f"Training plot saved to: {training_plot_path}")
     plt.show()
 
     # Save the Loss, NME, and Pixel Error to a text file
-    if mirror:
-        training_log_path = f"{LOGS_DIR}/{model_name}_training_log_crop{side}_mirror_{input_size}_{epochs}_{learning_rate}_{batch_size}.txt"
-    else:
-        training_log_path = f"{LOGS_DIR}/{model_name}_training_log_crop{side}_{input_size}_{epochs}_{learning_rate}_{batch_size}.txt"
+    training_log_path = os.path.join(LOGS_DIR, f"{exp_name}_training_log.txt")
     with open(training_log_path, "w") as f:
         for epoch, (loss, nme, pixel_error, val_loss, val_nme, val_pixel_error) in enumerate(
                 zip(epoch_losses, epoch_nmes, epoch_pixel_errors, val_losses, val_nmes, val_pixel_errors), 1):
@@ -697,9 +763,14 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=8, help="Number of samples per batch")
     parser.add_argument("--side", type=str, default="left", choices=["left", "right"], help="Side to train on: 'left' or 'right'")
     parser.add_argument("--mirror", action="store_true", help="Whether to include mirrored data from the opposite side")
+    parser.add_argument("--head_type", type=str, default="direct_regression", choices=["direct_regression", "simcc"], help="Which keypoint head to use")
+    parser.add_argument("--split_ratio", type=float, default=2, help="Validation split ratio")
+    parser.add_argument("--sigma", type=float, default=6.0, help="Sigma for SimCC label encoding")
+    
     args = parser.parse_args()
 
     main(args.data_dir, args.model_name, args.input_size, args.epochs, args.learning_rate,
-         args.batch_size, args.side, args.mirror)
+         args.batch_size, args.side, args.mirror, head_type=args.head_type, split_ratio=args.split_ratio, sigma=args.sigma)
 
-    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --input_size 448 --epochs 750 --learning_rate 0.0001 --batch_size 32 --side left
+    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --input_size 224 --epochs 300 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc --split_ratio 2
+    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --input_size 224 --epochs 300 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type direct_regression
