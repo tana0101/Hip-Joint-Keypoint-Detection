@@ -2,3 +2,5 @@
 logs/tb/
 *.tfevents.*
 events.out.tfevents.*
+*__pycache__/
+*.pyc
