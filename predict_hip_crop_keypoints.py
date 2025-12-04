@@ -1,53 +1,69 @@
 import os
 import argparse
 import torch
-from torchvision import transforms
 from PIL import Image, ImageOps
 import matplotlib.pyplot as plt
 import numpy as np
-from torchvision import models, transforms
-from torch import nn
 import pandas as pd
 import re
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score
 from scipy.stats import pearsonr, spearmanr, kendalltau
 from ultralytics import YOLO
 
-from utils.simcc import decode_simcc_to_xy
-
+from datasets.transforms import get_hip_base_transform
+from utils.detection import _detect_one, _square_expand_clip
+from utils.keypoints import get_pred_coords
 from models.model import initialize_model
+from utils.hip_geometry import (
+    calculate_acetabular_index_angles,
+    classify_quadrant_ihdi,
+    draw_hilgenreiner_line,
+    draw_perpendicular_line,
+    draw_diagonal_line,
+    draw_h_point,
+)
+from utils.plots import add_sigma_guides, add_zscore_right_axis
 
 POINTS_COUNT = 6
 REORDER_6 = [2, 1, 0, 5, 4, 3]  # 單側6點在左右鏡像後的索引重排（3點一組反轉）
 
-# Detection bbox 
-def _square_expand_clip(x1, y1, x2, y2, W, H, expand=0.10, keep_square=True):
-    """把 bbox 變成(可選)正方形並外擴，再裁到影像邊界內。"""
-    bw, bh = x2 - x1, y2 - y1
-    if keep_square:
-        side = max(bw, bh, 2.0)
-        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-        x1, x2 = cx - side / 2.0, cx + side / 2.0
-        y1, y2 = cy - side / 2.0, cy + side / 2.0
-        bw = bh = side
-    # 外擴
-    x1 -= bw * expand; x2 += bw * expand
-    y1 -= bh * expand; y2 += bh * expand
-    # 邊界裁切
-    x1 = max(0.0, x1); y1 = max(0.0, y1)
-    x2 = min(float(W), x2); y2 = min(float(H), y2)
-    # 避免 0 尺寸
-    if x2 <= x1: x2 = min(float(W), x1 + 2.0)
-    if y2 <= y1: y2 = min(float(H), y1 + 2.0)
-    return x1, y1, x2, y2
+YOLO_LEFT_CLS  = 0
+YOLO_RIGHT_CLS = 1
+YOLO_CONF      = 0.001
+YOLO_IOU       = 0.7
+BBOX_EXPAND    = 0.10
 
-def _detect_one(yolo_model, pil_img, cls_id, conf=0.05, iou=0.5):
-    """回傳單一 bbox (x1,y1,x2,y2)；若無偵測，回傳 None。"""
-    res = yolo_model.predict(source=pil_img, classes=[cls_id], conf=conf, iou=iou, max_det=1, verbose=False)
-    if not res or len(res[0].boxes) == 0:
-        return None
-    xyxy = res[0].boxes.xyxy[0].cpu().numpy().tolist()  # [x1,y1,x2,y2]
-    return tuple(float(v) for v in xyxy)
+DISTANCE_BINS = [
+    (0.0, 2.5,   "0-2.5"),
+    (2.5, 5.0,   "2.5-5"),
+    (5.0, 7.5,   "5-7.5"),
+    (7.5, 10.0,  "7.5-10"),
+    (10.0, 12.5, "10-12.5"),
+    (12.5, 15.0, "12.5-15"),
+    (15.0, np.inf,"15+"),
+]
+
+def build_distance_ranges(result_dir):
+    """依據 DISTANCE_BINS 建立對應的資料夾 dict。"""
+    distance_ranges = {}
+    for _, _, label in DISTANCE_BINS:
+        path = os.path.join(result_dir, label)
+        os.makedirs(path, exist_ok=True)
+        distance_ranges[label] = path
+    return distance_ranges
+
+def choose_distance_subfolder(avg_distance, distance_ranges):
+    """根據 avg_distance 找到對應的區間資料夾。"""
+    for lo, hi, label in DISTANCE_BINS:
+        # 最後一個是 (15.0, inf, "15+")，用 >= lo 即可
+        if np.isinf(hi):
+            if avg_distance >= lo:
+                return distance_ranges[label]
+        else:
+            if lo <= avg_distance < hi:
+                return distance_ranges[label]
+    # 理論上不會走到這裡，保險起見 fallback 到最後一個 bin
+    return distance_ranges[DISTANCE_BINS[-1][2]]
 
 def _infer_side_kp(
     kp_model,
@@ -88,7 +104,7 @@ def _infer_side_kp(
     return pred_orig
 
 # 使用鏡像模型預測函式
-def _hflip_kpts_224(kpts_6x2, input_size):
+def _hflip_kpts(kpts_6x2, input_size):
     """在 224x224 空間水平鏡像單側6點（numpy, shape=(6,2)）"""
     out = kpts_6x2.copy()
     out[:, 0] = (input_size - 1) - out[:, 0]
@@ -138,7 +154,7 @@ def _infer_via_mirror(
         pred_model_input = coords[0].detach().cpu().numpy()  # (K,2)
 
     # 3) input_size 空間反鏡像回未鏡像空間
-    pred_unflipped = _hflip_kpts_224(pred_model_input, input_size)
+    pred_unflipped = _hflip_kpts(pred_model_input, input_size)
 
     # 4) 索引重排：model_side → target_side
     pred_target_in = _reorder_between_sides(
@@ -174,27 +190,16 @@ def extract_info_from_model_path(model_path):
     支援的命名格式：
 
     SimCC 系列 (有 sr / sigma)，head_type 可以是：
-      - simcc
       - simcc_1d
       - simcc_2d
       - simcc_2d_deconv
 
-    範例：
-      model_simcc_sr2.0_sigma6.0_cropleft_448_300_0.0001_32_best.pth
-      model_simcc_1d_sr2.0_sigma6.0_cropright_mirror_224_300_0.0001_32.pth
+    例如：
+      model_simcc_1d_sr2.0_sigma6.0_cropright_mirror_224_300_0.0001_32_best.pth
       model_simcc_2d_deconv_sr1.5_sigma3.0_cropleft_448_300_0.0001_32.pth
 
     direct_regression (沒有 sr / sigma)：
       model_direct_regression_cropleft_448_300_0.0001_32_best.pth
-
-    回傳：
-      head_type    : str  (e.g. "simcc_1d", "simcc_2d", "simcc_2d_deconv", "direct_regression")
-      input_size   : int
-      epochs       : int
-      learning_rate: float
-      batch_size   : int
-      split_ratio  : float or None
-      sigma        : float or None
     """
     filename = os.path.basename(model_path)
 
@@ -202,7 +207,7 @@ def extract_info_from_model_path(model_path):
     #   e.g. _simcc_sr2.0_..., _simcc_1d_sr2.0_..., _simcc_2d_deconv_sr2.0_...
     pattern_simcc = re.compile(
         r'_('
-        r'simcc_2d_deconv|simcc_2d|simcc_1d|simcc'
+        r'simcc_2d_deconv|simcc_2d|simcc_1d'
         r')'                                  # group(1): head_type
         r'_sr([0-9eE\.\-]+)'                  # group(2): split_ratio (sr)
         r'_sigma([0-9eE\.\-]+)'               # group(3): sigma
@@ -259,159 +264,6 @@ def extract_info_from_model_path(model_path):
         "  model_simcc_2d_deconv_sr2.0_sigma6.0_cropleft_448_300_0.0001_32[_best.pth]\n"
         "  model_direct_regression_cropleft_448_300_0.0001_32[_best.pth]"
     )
-
-def draw_hilgenreiner_line(ax, p3, p7):
-    if np.allclose(p3[0], p7[0]):
-        ax.axvline(x=p3[0], color='cyan', linewidth=1, label='H-Line')
-    else:
-        a = (p7[1] - p3[1]) / (p7[0] - p3[0])
-        b = p3[1] - a * p3[0]
-        x_min, x_max = ax.get_xlim()
-        x_vals = np.array([x_min, x_max])
-        y_vals = a * x_vals + b
-        ax.plot(x_vals, y_vals, color='cyan', linewidth=1, label='H-Line')
-        
-def draw_perpendicular_line(ax, point, line_p1, line_p2, color='lime', label=None):
-    # 向量方向（H-line）
-    dx = line_p2[0] - line_p1[0]
-    dy = line_p2[1] - line_p1[1]
-
-    # 垂直向量：旋轉90度 (-dy, dx)
-    perp_dx = -dy
-    perp_dy = dx
-
-    # 將垂直向量延長一定比例來畫線
-    scale = 1  # 可調整線的長度
-    x0, y0 = point
-    x_vals = np.array([x0 - scale * perp_dx, x0 + scale * perp_dx])
-    y_vals = np.array([y0 - scale * perp_dy, y0 + scale * perp_dy])
-
-    ax.plot(x_vals, y_vals, color=color, linewidth=1, label=label)
-
-def draw_diagonal_line(ax, point, line_p1, line_p2, direction="left_down", color='orange', label=None):
-    a = np.array(line_p1)
-    b = np.array(line_p2)
-    p = np.array(point)
-    v = b - a
-
-    # 計算投影點（交點）
-    proj = a + v * np.dot(p - a, v) / np.dot(v, v)
-
-    # 決定方向
-    length = 100
-    if direction == "left_down":
-        dx, dy = -length, length   # 斜率 +1
-    elif direction == "right_down":
-        dx, dy = length, length    # 斜率 -1
-    else:
-        raise ValueError("direction must be 'left_down' or 'right_down'")
-
-    x_vals = [proj[0], proj[0] + dx]
-    y_vals = [proj[1], proj[1] + dy]
-    ax.plot(x_vals, y_vals, color=color, linewidth=1, label=label)
-
-def draw_h_point(ax, kpts):
-    h_left = (kpts[9] + kpts[11]) / 2   # pt10 & pt12 中點
-    h_right = (kpts[3] + kpts[5]) / 2   # pt4 & pt6 中點
-
-    # 使用亮黃色 + 圓形
-    ax.scatter(*h_left, c="blue", s=4, label='H-point')
-    ax.scatter(*h_right, c="blue", s=4)
-
-# 計算 AI 角度
-def calculate_acetabular_index_angles(points):
-    p1 = points[0]
-    p3 = points[2]
-    p7 = points[6]
-    p9 = points[8]
-    v_h = p7 - p3
-    v_left = p3 - p1
-    v_right = p7 - p9
-    def angle(v1, v2):
-        cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
-        return np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
-    return angle(v_h, v_left), angle(-v_h, v_right)
-
-# 判斷IHDI象限
-def classify_quadrant_ihdi(points):
-    """
-    根據 IHDI 分類圖，判斷左右 H-point 各自落在哪個象限。
-    
-    參數
-    -------
-    points : array-like, shape=(12, 2)
-        依序為 1~12 點的 (x, y) 影像座標（x 向右、y 向下）。
-    
-    回傳
-    -------
-    left_q , right_q : str
-        左、右股骨頭中心所在象限，字元 'I' ~ 'IV'
-        
-    實作方式
-    -------
-    將股骨頭中心點（H-point）投影到以 H-line 為水平、P-line 為垂直的局部座標系中，並依其位置判斷其落在哪個象限（I~IV）。
-    
-    """
-    pts = np.asarray(points, dtype=float)
-    if pts.shape != (12, 2):
-        raise ValueError("`points` 必須是 (12, 2) 的座標陣列")
-
-    # ---- 取出關鍵點 --------------------------------------------------------
-    p1  = pts[0]      # 左 P-line 基準
-    p3  = pts[2]      # H-line 起點
-    p4  = pts[3]      # 左股骨頭
-    p6  = pts[5]
-    p7  = pts[6]      # H-line 終點
-    p9  = pts[8]      # 右 P-line 基準
-    p10 = pts[9]      # 右股骨頭
-    p12 = pts[11]
-
-    # ---- 基準座標系：x 軸沿 H-line，y 軸向下 ------------------------------
-    v_h = p7 - p3
-    u_h = v_h / np.linalg.norm(v_h)                     # 單位 H 向量
-
-    # 兩種垂直方向：順時針 / 逆時針 90°
-    v_p1 = np.array([ v_h[1], -v_h[0]])
-    v_p2 = np.array([-v_h[1],  v_h[0]])
-    v_p  = v_p1 if v_p1[1] > v_p2[1] else v_p2          # y 分量大的朝「下」
-    u_p  = v_p / np.linalg.norm(v_p)                    # 單位「下」向量
-
-    # H-line 與 P-line 交點（作為原點）
-    def proj_on_h(pt):                                  # 投影到 H-line
-        t = np.dot(pt - p3, u_h)
-        return p3 + t * u_h
-
-    o_r = proj_on_h(p9)                                 # 右側原點
-    o_l = proj_on_h(p1)                                 # 左側原點
-
-    # H-points
-    h_r = (p10 + p12) / 2.0
-    h_l = (p4  + p6 ) / 2.0
-
-    # 轉成局部 (x, y)
-    def to_xy(p, o):
-        vec = p - o
-        return np.dot(vec, u_h), np.dot(vec, u_p)
-
-    x_r, y_r = to_xy(h_r, o_r)
-    x_l, y_l = to_xy(h_l, o_l)
-    x_l = -x_l            # 左側鏡射：使遠離脊椎方向為 x 正
-
-    # ---- 象限規則（以右側為基準） -----------------------------------------
-    def quad(x, y):
-        # IV：在 H-line 上方／接近上方
-        if y <= 0 and x >= 0:
-            return 'IV'
-        # I：H-line 下 + P-line 左
-        if y > 0 and x < 0:
-            return 'I'
-        # II / III：H-line 下 + P-line 右，依對角線分界
-        if y > 0 and x >= 0:
-            return 'II' if y > x else 'III'
-        # 其他極少見邊界情況 → 歸為 none
-        return 'none'
-
-    return quad(x_l, y_l), quad(x_r, y_r)
 
 def draw_comparison_figure(
     image, pred_kpts, gt_kpts, ai_pred, ai_gt,
@@ -616,88 +468,6 @@ def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
     else:
         plt.show()
 
-# ---------- helpers for sigma guides ----------
-def add_sigma_guides(ax, mu, std, one_sigma_alpha=0.10, line_alpha=0.35, mu_label=None, label=None, mu_color='red', color='blue'):
-    """
-    在圖上加上 μ±1σ 淡色區間、以及 μ、μ±1σ、μ±2σ 參考線。
-    """
-    ymin, ymax = ax.get_ylim()
-
-    # ±1σ淡色區間
-    ax.axhspan(mu - std, mu + std, alpha=one_sigma_alpha, color=color)
-
-    # μ與σ參考線
-    ax.axhline(mu, linestyle='--', linewidth=1.5, label=mu_label, color=mu_color)
-    for k in (1, 2):
-        ax.axhline(mu + k*std, linestyle=':', alpha=line_alpha, linewidth=1.2, 
-                   color=color, label=label if k == 1 else None)
-        ax.axhline(mu - k*std, linestyle=':', alpha=line_alpha, linewidth=1.2, 
-                   color=color)
-
-    # 保持原本y範圍（避免被新元素改動）
-    ax.set_ylim(ymin, ymax)
-
-def add_zscore_right_axis(ax, mu, std):
-    """
-    在右側加上 z-score 軸（標準化差異）。
-    """
-    def y_to_z(y): return (y - mu) / std
-    def z_to_y(z): return z * std + mu
-    secax = ax.secondary_yaxis('right', functions=(y_to_z, z_to_y))
-    secax.set_ylabel('Standardized difference (σ)')
-    secax.set_yticks([-2, -1, 0, 1, 2])
-    return secax
-
-def get_pred_coords(outputs, head_type, Nx=None, Ny=None, input_size=None):
-    """
-    把模型輸出統一轉成 [B, K, 2] 的 tensor (還在 model device 上)。
-
-    支援情況：
-      - direct_regression:
-          outputs = {"type": "direct_regression", "coords": [B, K, 2] or [B, 2K]}
-          或 outputs 直接是 tensor [B, K, 2] / [B, 2K]
-
-      - simcc_1d / simcc_2d / simcc_2d_deconv:
-          outputs = {
-              "type": "...",
-              "logits_x": [B, K, Nx],
-              "logits_y": [B, K, Ny],
-          }
-          → decode_simcc_to_xy() → [B, K, 2]
-    """
-    # ---- direct regression ----
-    if head_type == "direct_regression":
-        if isinstance(outputs, dict):
-            coords = outputs["coords"]      # [B, K, 2] or [B, 2K]
-        else:
-            coords = outputs                # tensor
-        return coords
-
-    # ---- SimCC 系列 ----
-    elif head_type in ["simcc", "simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
-        if isinstance(outputs, dict):
-            pred_x = outputs["logits_x"]
-            pred_y = outputs["logits_y"]
-        else:
-            # 舊版: 直接回傳 (pred_x, pred_y)
-            pred_x, pred_y = outputs
-
-        assert Nx is not None and Ny is not None and input_size is not None, \
-            "SimCC decode 需要 Nx, Ny, input_size"
-
-        coords = decode_simcc_to_xy(
-            pred_x,
-            pred_y,
-            Nx=Nx,
-            Ny=Ny,
-            input_size=input_size,
-        )   # [B, K, 2]
-        
-        return coords
-
-    else:
-        raise ValueError(f"Unknown head_type={head_type} in get_pred_coords()")
-
 def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir):
     
     # 0) 以存在的模型路徑擷取紀錄資訊
@@ -718,7 +488,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
           f"  sigma        : {sigma}\n"
     )
     
-    if head_type in ["simcc", "simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
+    if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
         assert split_ratio is not None and sigma is not None, "SimCC 模型需要有 split_ratio 與 sigma"
         Nx = int(input_size * split_ratio)
         Ny = int(input_size * split_ratio)
@@ -730,11 +500,12 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     
     kp_left = kp_right = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    points_count = POINTS_COUNT
     
     if use_left:
         kp_left = initialize_model(
             model_name,
-            POINTS_COUNT,
+            points_count,
             head_type=head_type,
             input_size=(input_size, input_size),
             Nx=Nx,
@@ -747,7 +518,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     if use_right:
         kp_right = initialize_model(
             model_name,
-            POINTS_COUNT,
+            points_count,
             head_type=head_type,
             input_size=(input_size, input_size),
             Nx=Nx,
@@ -774,29 +545,12 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     os.makedirs(crops_right_dir, exist_ok=True)
 
     # Create subdirectories for distance ranges
-    distance_ranges = {
-        "0-2.5": os.path.join(result_dir, "0-2.5"),
-        "2.5-5": os.path.join(result_dir, "2.5-5"),
-        "5-7.5": os.path.join(result_dir, "5-7.5"),
-        "7.5-10": os.path.join(result_dir, "7.5-10"),
-        "10-12.5": os.path.join(result_dir, "10-12.5"),
-        "12.5-15": os.path.join(result_dir, "12.5-15"),
-        "15-17.5": os.path.join(result_dir, "15-17.5"),
-        "17.5-20": os.path.join(result_dir, "17.5-20"),
-        "20-30": os.path.join(result_dir, "20-30"),
-        "30-40": os.path.join(result_dir, "30-40"),
-        "40+": os.path.join(result_dir, "40+"),
-    }
+    distance_ranges = build_distance_ranges(result_dir)
     
     for path in distance_ranges.values():
         os.makedirs(path, exist_ok=True)
 
-    transform = transforms.Compose([
-        transforms.Grayscale(num_output_channels=3),  
-        transforms.Lambda(lambda img: ImageOps.equalize(img)),  # Apply histogram equalization
-        transforms.Resize((input_size, input_size)),
-        transforms.ToTensor(),
-    ])
+    transform = get_hip_base_transform(input_size)
 
     all_avg_distances = []  # To store all distances
     image_labels = []  # To store image indices (1, 2, 3, ...)
@@ -812,8 +566,9 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     right_preds_all = [] # To store right predicted keypoints
     right_gts_all = [] # To store right ground truth keypoints
 
-
-    for image_file in os.listdir(os.path.join(data_dir, 'images')):
+    image_dir = os.path.join(data_dir, 'images')
+    image_files = sorted(f for f in os.listdir(image_dir) if f.lower().endswith((".jpg", ".jpeg", ".png")))
+    for image_counter, image_file in enumerate(image_files, start=1):
         if image_file.endswith('.jpg'):
             image_path = os.path.join(data_dir, 'images', image_file)
             image_pil = Image.open(image_path).convert("RGB")  # YOLO 用 RGB 較穩
@@ -930,28 +685,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             right_gts_all.append(right_quadrants_gt)
             
             # Determine the subdirectory based on avg_distance
-            if avg_distance <= 2.5:
-                subfolder = distance_ranges["0-2.5"]
-            elif avg_distance <= 5:
-                subfolder = distance_ranges["2.5-5"]
-            elif avg_distance <= 7.5:
-                subfolder = distance_ranges["5-7.5"]
-            elif avg_distance <= 10:
-                subfolder = distance_ranges["7.5-10"]
-            elif avg_distance <= 12.5:
-                subfolder = distance_ranges["10-12.5"]
-            elif avg_distance <= 15:
-                subfolder = distance_ranges["12.5-15"]
-            elif avg_distance <= 17.5:
-                subfolder = distance_ranges["15-17.5"]
-            elif avg_distance <= 20:
-                subfolder = distance_ranges["17.5-20"]
-            elif avg_distance <= 30:
-                subfolder = distance_ranges["20-30"]
-            elif avg_distance <= 40:
-                subfolder = distance_ranges["30-40"]
-            else:
-                subfolder = distance_ranges["40+"]
+            subfolder = choose_distance_subfolder(avg_distance, distance_ranges)
 
             # 畫出左右對照圖
             draw_comparison_figure(
@@ -1111,4 +845,4 @@ if __name__ == "__main__":
     )
 
 # 單側模型預測
-# python3 predict_hip_crop_keypoints.py --model_name convnext --kp_left_path weights/convnext_direct_regression_cropleft_mirror_224_300_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
+# python3 predict_hip_crop_keypoints.py --model_name convnext_small_fpn1234concat --kp_left_path results/25_simcc/convnext_small_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights weights/yolo12s.pt --data "data/test" --output_dir "results"
