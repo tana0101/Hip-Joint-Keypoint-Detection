@@ -27,6 +27,7 @@ class KeypointFeatureExtractor(nn.Module):
 class InceptionNextSmall(nn.Module):
     def __init__(self, num_points,
                  head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),
                  Nx=None, Ny=None,
                  drop=0.0):
         super().__init__()

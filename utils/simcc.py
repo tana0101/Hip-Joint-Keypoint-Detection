@@ -14,7 +14,11 @@ def compute_loss_simcc(
     simcc_label_encoder,  # encoder
     simcc_loss_fn,        # SimCCLoss
 ):
-    pred_x, pred_y = outputs  # 假設 SimCCHead 回傳 (pred_x, pred_y)
+    if isinstance(outputs, dict):
+        pred_x = outputs["logits_x"]
+        pred_y = outputs["logits_y"]
+    else:
+        pred_x, pred_y = outputs
 
     # 對 GT keypoints 做 1D label 編碼（x / y 各一條）
     target_x, target_y, target_weight = simcc_label_encoder(
@@ -193,7 +197,6 @@ def decode_simcc_to_xy(
 
     # 拼成 [B, K, 2] -> [B, 2*K] (x1,y1,x2,y2,...)
     coords = torch.stack([x, y], dim=-1)  # [B, K, 2]
-    coords = coords.view(B, -1)           # [B, 2*K]
 
     return coords
 
@@ -243,12 +246,14 @@ def visualize_simcc_distributions(
     # 設定 X 軸圖表細節 (Zoom in 到目標點附近 +/- 40 bins)
     center_x = int(keypoint[0] / input_size * Nx)
     ax1.set_xlim(max(0, center_x - 40), min(Nx, center_x + 40))
+    # ax1.set_xlim(0, 672)
     ax1.set_title(f"X-axis Target @ {keypoint[0]}")
     ax1.legend(); ax1.grid(True, alpha=0.3)
 
     # 設定 Y 軸圖表細節
     center_y = int(keypoint[1] / input_size * Ny)
     ax2.set_xlim(max(0, center_y - 40), min(Ny, center_y + 40))
+    # ax2.set_xlim(0, 672)
     ax2.set_title(f"Y-axis Target @ {keypoint[1]}")
     ax2.legend(); ax2.grid(True, alpha=0.3)
 
@@ -266,11 +271,13 @@ if __name__ == "__main__":
         {'sigma': 4.0},
         {'sigma': 5.0},
         {'sigma': 6.0},
+        {'sigma': 7.0},
+        {'sigma': 8.0},
     ]
 
     visualize_simcc_distributions(
         keypoint=(100, 150),
-        Nx=448, Ny=448, input_size=224,
+        Nx=672, Ny=672, input_size=224,
         params_list=params_to_test,
         save_path='simcc_comparison.png'
     )

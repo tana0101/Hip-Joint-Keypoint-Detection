@@ -123,110 +123,97 @@ def get_hrnet_w48_cfg():
     return cfg
 
 
-class _HRNetWithHead(nn.Module):
-    """
-    共用 wrapper：HRNetBackbone -> GAP -> (optional proj) -> HeadAdapter
-    """
-
-    def __init__(
-        self,
-        backbone: hrnet.HRNetBackbone,
-        num_points: int,
-        head_type: str = "direct_regression",
-        Nx: int | None = None,
-        Ny: int | None = None,
-        proj_dim: int | None = None,
-    ):
-        super().__init__()
-        self.backbone = backbone
-        self.gap = nn.AdaptiveAvgPool2d(1)
-
-        in_features = backbone.backbone_out_channels  # w32=32, w48=48
-
-        if proj_dim is not None:
-            self.proj = nn.Linear(in_features, proj_dim)
-            in_features = proj_dim
-        else:
-            self.proj = None
-
-        self.head = HeadAdapter(
-            head_type=head_type,
-            in_features=in_features,
-            num_points=num_points,
-            Nx=Nx,
-            Ny=Ny,
-        )
-
-    def forward(self, x):
-        feats = self.backbone(x)   # [B,C,H,W]
-        feats = self.gap(feats)    # [B,C,1,1]
-        feats = feats.flatten(1)   # [B,C]
-        if self.proj is not None:
-            feats = self.proj(feats)
-        return self.head(feats)
-
-
-class HRNetW32Custom(_HRNetWithHead):
+class HRNetW32Custom(nn.Module):
     """
     HRNet-W32 backbone + 可插拔 head。
     initialize_model("hrnet_w32", ...) 會回傳這個類別的 instance。
     """
-
     def __init__(
         self,
         num_points: int,
-        head_type: str = "direct_regression",
+        head_type: str = "direct_regression",    # "direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv"
+        input_size: tuple[int, int] = (256, 256),
         Nx: int | None = None,
         Ny: int | None = None,
-        proj_dim: int | None = None,
         pretrained_path: str | None = None,
-        **kwargs,
+        **head_kwargs,   # 給 HeadAdapter 的額外參數：比如 use_gap_norm, norm_type, num_deconv_layers...
     ):
+        super().__init__()
+
+        # 1) 建 HRNet-W32 backbone
         cfg = get_hrnet_w32_cfg()
-        backbone = hrnet.HRNetBackbone(cfg)
+        self.backbone = hrnet.HRNetBackbone(cfg)
 
         if pretrained_path is not None:
             state = torch.load(pretrained_path, map_location="cpu")
-            backbone.load_state_dict(state, strict=False)
+            self.backbone.load_state_dict(state, strict=False)
 
-        super().__init__(
-            backbone=backbone,
-            num_points=num_points,
+        # 2) 用 dummy 推出 HRNet backbone 輸出 feature map 的 shape
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, input_size[0], input_size[1])
+            feat = self.backbone(dummy)          # 預期: [1, C_out, H, W]
+            _, C_out, H, W = feat.shape
+
+        # 3) 建立通用 HeadAdapter
+        self.head = HeadAdapter(
             head_type=head_type,
+            in_channels=C_out,          # HRNet 輸出 channels
+            map_size=(H, W),            # HRNet 輸出 H, W
+            num_points=num_points,
             Nx=Nx,
             Ny=Ny,
-            proj_dim=proj_dim,
+            **head_kwargs,              # 例如 use_gap_norm=True, norm_type="layernorm"
         )
 
+    def forward(self, x: torch.Tensor):
+        feat = self.backbone(x)   # [B, C_out, H, W]
+        out = self.head(feat)     # HeadAdapter 裡決定 GAP/Conv2d/deconv/SimCC/Regression
+        return out
 
-class HRNetW48Custom(_HRNetWithHead):
+
+class HRNetW48Custom(nn.Module):
     """
     HRNet-W48 backbone + 可插拔 head。
     initialize_model("hrnet_w48", ...) 會回傳這個類別的 instance。
     """
-
     def __init__(
         self,
         num_points: int,
         head_type: str = "direct_regression",
+        input_size: tuple[int, int] = (256, 256),
         Nx: int | None = None,
         Ny: int | None = None,
-        proj_dim: int | None = None,
         pretrained_path: str | None = None,
-        **kwargs,
+        **head_kwargs,
     ):
+        super().__init__()
+
+        # 1) 建 HRNet-W48 backbone
         cfg = get_hrnet_w48_cfg()
-        backbone = hrnet.HRNetBackbone(cfg)
+        self.backbone = hrnet.HRNetBackbone(cfg)
 
         if pretrained_path is not None:
             state = torch.load(pretrained_path, map_location="cpu")
-            backbone.load_state_dict(state, strict=False)
+            self.backbone.load_state_dict(state, strict=False)
 
-        super().__init__(
-            backbone=backbone,
-            num_points=num_points,
+        # 2) 用 dummy 推 feature map shape
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, input_size[0], input_size[1])
+            feat = self.backbone(dummy)          # [1, C_out, H, W]
+            _, C_out, H, W = feat.shape
+
+        # 3) HeadAdapter
+        self.head = HeadAdapter(
             head_type=head_type,
+            in_channels=C_out,
+            map_size=(H, W),
+            num_points=num_points,
             Nx=Nx,
             Ny=Ny,
-            proj_dim=proj_dim,
+            **head_kwargs,
         )
+
+    def forward(self, x: torch.Tensor):
+        feat = self.backbone(x)
+        out = self.head(feat)
+        return out

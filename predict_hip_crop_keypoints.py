@@ -60,44 +60,32 @@ def _infer_side_kp(
     Ny=None,
 ):
     """
-    對單側裁切圖做前處理→預測→轉回原圖座標系 (回傳 shape=(6,2) 的 numpy)。
-
-    head_type:
-      - "direct_regression": kp_model(crop_tensor) → [B, 2*K]
-      - "simcc":             kp_model(crop_tensor) → (pred_x, pred_y)，再 decode 成 [B, 2*K]
+    對單側裁切圖做前處理→預測→轉回原圖座標系 (回傳 shape=(K,2) 的 numpy)。
     """
     x1, y1, x2, y2 = crop_box
     crop_w, crop_h = (x2 - x1), (y2 - y1)
 
-    # 前處理（與訓練一致）
-    crop_tensor = transform(pil_crop).unsqueeze(0)   # [1,3,input_size,input_size]
-
-    # 取得模型所在裝置，並把輸入搬到同裝置
+    crop_tensor = transform(pil_crop).unsqueeze(0)   # [1,3,H,W]
     device = next(kp_model.parameters()).device
     crop_tensor = crop_tensor.to(device, non_blocking=True)
 
     with torch.inference_mode():
-        if head_type == "simcc":
-            # SimCC: model 回傳 (pred_x, pred_y)
-            pred_x, pred_y = kp_model(crop_tensor)          # [1, K, Nx], [1, K, Ny]
-            coords = decode_simcc_to_xy(
-                pred_x, pred_y,
-                Nx=Nx,
-                Ny=Ny,
-                input_size=input_size,
-            )                                               # [1, 2*K]
-            pred = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
-        else:
-            # direct_regression: model 直接輸出 [B, 2*K]
-            coords = kp_model(crop_tensor)                  # [1, 2*K]
-            pred = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
+        outputs = kp_model(crop_tensor)
+        coords = get_pred_coords(
+            outputs,
+            head_type=head_type,
+            Nx=Nx,
+            Ny=Ny,
+            input_size=input_size,
+        )   # [1, K, 2]
+        pred = coords[0].detach().cpu().numpy()  # (K,2)
 
     # 反映射回原圖座標
     sx, sy = crop_w / input_size, crop_h / input_size
     pred_orig = np.empty_like(pred)
     pred_orig[:, 0] = pred[:, 0] * sx + x1
     pred_orig[:, 1] = pred[:, 1] * sy + y1
-    return pred_orig  # (6,2)
+    return pred_orig
 
 # 使用鏡像模型預測函式
 def _hflip_kpts_224(kpts_6x2, input_size):
@@ -125,31 +113,29 @@ def _infer_via_mirror(
     Ny=None,
 ):
     """
-    單模型模式：把 'target_side' 的裁切圖鏡像成 'model_side' 外觀 → 用該模型推論 →
-    在 input_size 空間反鏡像回來 → 做 from=model_side → to=target_side 的索引重排 → 反投影回原圖。
-    回傳 (6,2) numpy（target_side 的順序）。
+    單模型鏡像推論：
+      target_side crop → mirror → 用 model_side 模型推 → 在 input_size 空間反鏡像 →
+      做 from=model_side → to=target_side 的索引重排 → 反投影回原圖。
+    回傳 (K,2) numpy（target_side 順序）。
     """
     # 1) 目標側裁切 → 鏡像成模型側外觀
-    pil_mirror = ImageOps.mirror(pil_crop_src)  # 水平鏡像
+    pil_mirror = ImageOps.mirror(pil_crop_src)
 
-    # 2) 模型在鏡像空間推論（得到 model_side 順序，座標= input_size x input_size）
+    # 2) 模型在鏡像空間推論
     crop_tensor = transform(pil_mirror).unsqueeze(0)
     device = next(kp_model.parameters()).device
     crop_tensor = crop_tensor.to(device, non_blocking=True)
 
     with torch.inference_mode():
-        if head_type == "simcc":
-            pred_x, pred_y = kp_model(crop_tensor)          # [1, K, Nx], [1, K, Ny]
-            coords = decode_simcc_to_xy(
-                pred_x, pred_y,
-                Nx=Nx,
-                Ny=Ny,
-                input_size=input_size,
-            )                                               # [1, 2*K]
-            pred_model_input = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
-        else:
-            coords = kp_model(crop_tensor)                  # [1, 2*K]
-            pred_model_input = coords.detach().cpu().numpy().reshape(-1, 2)  # (K,2)
+        outputs = kp_model(crop_tensor)
+        coords = get_pred_coords(
+            outputs,
+            head_type=head_type,
+            Nx=Nx,
+            Ny=Ny,
+            input_size=input_size,
+        )   # [1, K, 2]
+        pred_model_input = coords[0].detach().cpu().numpy()  # (K,2)
 
     # 3) input_size 空間反鏡像回未鏡像空間
     pred_unflipped = _hflip_kpts_224(pred_model_input, input_size)
@@ -185,75 +171,92 @@ def calculate_avg_distance(predicted_keypoints, original_keypoints):
 
 def extract_info_from_model_path(model_path):
     """
-    支援兩種命名：
-      simcc:
-        model_simcc_sr2.0_sigma6.0_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
-      direct_regression:
-        model_direct_regression_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
+    支援的命名格式：
+
+    SimCC 系列 (有 sr / sigma)，head_type 可以是：
+      - simcc
+      - simcc_1d
+      - simcc_2d
+      - simcc_2d_deconv
+
+    範例：
+      model_simcc_sr2.0_sigma6.0_cropleft_448_300_0.0001_32_best.pth
+      model_simcc_1d_sr2.0_sigma6.0_cropright_mirror_224_300_0.0001_32.pth
+      model_simcc_2d_deconv_sr1.5_sigma3.0_cropleft_448_300_0.0001_32.pth
+
+    direct_regression (沒有 sr / sigma)：
+      model_direct_regression_cropleft_448_300_0.0001_32_best.pth
 
     回傳：
-      input_size : int
-      epochs     : int
-      learning_rate : float
-      batch_size : int
-      split_ratio: float or None  (simcc 有值, direct_regression 為 None)
+      head_type    : str  (e.g. "simcc_1d", "simcc_2d", "simcc_2d_deconv", "direct_regression")
+      input_size   : int
+      epochs       : int
+      learning_rate: float
+      batch_size   : int
+      split_ratio  : float or None
+      sigma        : float or None
     """
     filename = os.path.basename(model_path)
 
-    # 1) 先試 simcc 有 sr 的版本
-    #    model_simcc_sr2.0_sigma6.0_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
+    # 1) SimCC 系列：先抓 head_type + sr + sigma
+    #   e.g. _simcc_sr2.0_..., _simcc_1d_sr2.0_..., _simcc_2d_deconv_sr2.0_...
     pattern_simcc = re.compile(
-        r'_simcc_sr([0-9eE\.\-]+)'        # sr2.0 -> 捕捉 "2.0"
-        r'_sigma([0-9eE\.\-]+)'           # sigma6.0 -> 捕捉 "6.0"
-        r'_crop(left|right)'              # _cropleft or _cropright
-        r'(?:_mirror)?'                   # 可選的 _mirror
-        r'_(\d+)'                         # input_size
-        r'_([0-9]+)'                      # epochs
-        r'_([0-9eE\.\-]+)'                # learning_rate
-        r'_([0-9]+)'                      # batch_size
-        r'(?:_best\.pth)?$'               # 可選的 _best.pth 結尾
+        r'_('
+        r'simcc_2d_deconv|simcc_2d|simcc_1d|simcc'
+        r')'                                  # group(1): head_type
+        r'_sr([0-9eE\.\-]+)'                  # group(2): split_ratio (sr)
+        r'_sigma([0-9eE\.\-]+)'               # group(3): sigma
+        r'_crop(left|right)'                  # group(4): side
+        r'(?:_mirror)?'                       # optional _mirror
+        r'_(\d+)'                             # group(5): input_size
+        r'_([0-9]+)'                          # group(6): epochs
+        r'_([0-9eE\.\-]+)'                    # group(7): learning_rate
+        r'_([0-9]+)'                          # group(8): batch_size
+        r'(?:_best\.pth)?$'                   # optional _best.pth
     )
 
     m = pattern_simcc.search(filename)
     if m:
-        split_ratio   = float(m.group(1))
-        sigma         = float(m.group(2))
-        # side          = m.group(3)
-        input_size    = int(m.group(4))
-        epochs        = int(m.group(5))
-        learning_rate = float(m.group(6))
-        batch_size    = int(m.group(7))
-        return input_size, epochs, learning_rate, batch_size, split_ratio, sigma
+        head_type     = m.group(1)
+        split_ratio   = float(m.group(2))
+        sigma         = float(m.group(3))
+        # side        = m.group(4)
+        input_size    = int(m.group(5))
+        epochs        = int(m.group(6))
+        learning_rate = float(m.group(7))
+        batch_size    = int(m.group(8))
+        return head_type, input_size, epochs, learning_rate, batch_size, split_ratio, sigma
 
-    # 2) 再試 direct_regression 的版本
-    #    model_direct_regression_cropleft[_mirror]_448_300_0.0001_32[_best.pth]
+    # 2) direct_regression
     pattern_dr = re.compile(
-        r'_direct_regression'
-        r'_crop(left|right)'              # _cropleft or _cropright
-        r'(?:_mirror)?'                   # 可選的 _mirror
-        r'_(\d+)'                         # input_size
-        r'_([0-9]+)'                      # epochs
-        r'_([0-9eE\.\-]+)'                # learning_rate
-        r'_([0-9]+)'                      # batch_size
-        r'(?:_best\.pth)?$'               # 可選的 _best.pth
+        r'_(direct_regression)'               # group(1): head_type
+        r'_crop(left|right)'                  # group(2): side
+        r'(?:_mirror)?'                       # optional _mirror
+        r'_(\d+)'                             # group(3): input_size
+        r'_([0-9]+)'                          # group(4): epochs
+        r'_([0-9eE\.\-]+)'                    # group(5): learning_rate
+        r'_([0-9]+)'                          # group(6): batch_size
+        r'(?:_best\.pth)?$'                   # optional _best.pth
     )
 
     m2 = pattern_dr.search(filename)
     if m2:
-        # side = m2.group(1)
-        input_size    = int(m2.group(2))
-        epochs        = int(m2.group(3))
-        learning_rate = float(m2.group(4))
-        batch_size    = int(m2.group(5))
-        split_ratio   = None  # direct_regression 沒有 sr
+        head_type     = m2.group(1)          # "direct_regression"
+        # side        = m2.group(2)
+        input_size    = int(m2.group(3))
+        epochs        = int(m2.group(4))
+        learning_rate = float(m2.group(5))
+        batch_size    = int(m2.group(6))
+        split_ratio   = None
         sigma         = None
-        return input_size, epochs, learning_rate, batch_size, split_ratio, sigma
+        return head_type, input_size, epochs, learning_rate, batch_size, split_ratio, sigma
 
     # 3) 都沒 match 就報錯
     raise ValueError(
         f"Model path format is invalid: {filename}\n"
         "Expected something like:\n"
-        "  model_simcc_sr2.0_cropleft_448_300_0.0001_32[_best.pth]\n"
+        "  model_simcc_1d_sr2.0_sigma6.0_cropleft_448_300_0.0001_32[_best.pth]\n"
+        "  model_simcc_2d_deconv_sr2.0_sigma6.0_cropleft_448_300_0.0001_32[_best.pth]\n"
         "  model_direct_regression_cropleft_448_300_0.0001_32[_best.pth]"
     )
 
@@ -644,7 +647,57 @@ def add_zscore_right_axis(ax, mu, std):
     secax.set_ylabel('Standardized difference (σ)')
     secax.set_yticks([-2, -1, 0, 1, 2])
     return secax
-    
+
+def get_pred_coords(outputs, head_type, Nx=None, Ny=None, input_size=None):
+    """
+    把模型輸出統一轉成 [B, K, 2] 的 tensor (還在 model device 上)。
+
+    支援情況：
+      - direct_regression:
+          outputs = {"type": "direct_regression", "coords": [B, K, 2] or [B, 2K]}
+          或 outputs 直接是 tensor [B, K, 2] / [B, 2K]
+
+      - simcc_1d / simcc_2d / simcc_2d_deconv:
+          outputs = {
+              "type": "...",
+              "logits_x": [B, K, Nx],
+              "logits_y": [B, K, Ny],
+          }
+          → decode_simcc_to_xy() → [B, K, 2]
+    """
+    # ---- direct regression ----
+    if head_type == "direct_regression":
+        if isinstance(outputs, dict):
+            coords = outputs["coords"]      # [B, K, 2] or [B, 2K]
+        else:
+            coords = outputs                # tensor
+        return coords
+
+    # ---- SimCC 系列 ----
+    elif head_type in ["simcc", "simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
+        if isinstance(outputs, dict):
+            pred_x = outputs["logits_x"]
+            pred_y = outputs["logits_y"]
+        else:
+            # 舊版: 直接回傳 (pred_x, pred_y)
+            pred_x, pred_y = outputs
+
+        assert Nx is not None and Ny is not None and input_size is not None, \
+            "SimCC decode 需要 Nx, Ny, input_size"
+
+        coords = decode_simcc_to_xy(
+            pred_x,
+            pred_y,
+            Nx=Nx,
+            Ny=Ny,
+            input_size=input_size,
+        )   # [B, K, 2]
+        
+        return coords
+
+    else:
+        raise ValueError(f"Unknown head_type={head_type} in get_pred_coords()")
+
 def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir):
     
     # 0) 以存在的模型路徑擷取紀錄資訊
@@ -653,22 +706,23 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     assert use_left or use_right, "至少提供 --kp_left_path 或 --kp_right_path 其中之一"
     
     ref_model_path = kp_left_path if use_left else kp_right_path
-    input_size, epochs, learning_rate, batch_size, split_ratio, sigma = extract_info_from_model_path(ref_model_path)
-    print(f"Model info extracted from path:\n"
-          f"  input_size    : {input_size}\n"
-          f"  epochs        : {epochs}\n"
-          f"  learning_rate : {learning_rate}\n"
-          f"  batch_size    : {batch_size}\n"
-          f"  split_ratio   : {split_ratio}\n"
-          f"  sigma         : {sigma}"
-         )
+    head_type, input_size, epochs, learning_rate, batch_size, split_ratio, sigma = extract_info_from_model_path(ref_model_path)
+    print(f"Extracted model info:\n"
+          f"  model_name   : {model_name}\n"
+          f"  head_type    : {head_type}\n"
+          f"  input_size   : {input_size}\n"
+          f"  epochs       : {epochs}\n"
+          f"  learning_rate: {learning_rate}\n"
+          f"  batch_size   : {batch_size}\n"
+          f"  split_ratio  : {split_ratio}\n"
+          f"  sigma        : {sigma}\n"
+    )
     
-    if split_ratio is not None:
-        head_type = "simcc"
+    if head_type in ["simcc", "simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
+        assert split_ratio is not None and sigma is not None, "SimCC 模型需要有 split_ratio 與 sigma"
         Nx = int(input_size * split_ratio)
         Ny = int(input_size * split_ratio)
     else:
-        head_type = "direct_regression"
         Nx = Ny = None
     
     # 1) 載入 YOLO + KP 模型（左右可能有其一缺省）
@@ -682,6 +736,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             model_name,
             POINTS_COUNT,
             head_type=head_type,
+            input_size=(input_size, input_size),
             Nx=Nx,
             Ny=Ny,
         )
@@ -694,6 +749,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             model_name,
             POINTS_COUNT,
             head_type=head_type,
+            input_size=(input_size, input_size),
             Nx=Nx,
             Ny=Ny,
         )
@@ -703,7 +759,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
 
     # 2) 建結果資料夾
     crop_side = "both-sides" if use_left and use_right else ("left-only" if use_left else "right-only")
-    if head_type == "simcc":
+    if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
         exp_name = f"{model_name}_{head_type}_sr{split_ratio}_sigma{sigma}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}"
     else:
         exp_name = f"{model_name}_{head_type}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}"

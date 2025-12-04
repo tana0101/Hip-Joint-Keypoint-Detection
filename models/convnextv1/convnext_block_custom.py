@@ -177,11 +177,16 @@ class ConvNeXt(nn.Module):
         for i in range(4):
             x = self.downsample_layers[i](x)
             x = self.stages[i](x)
-        return self.norm(x.mean([-2, -1])) # global average pooling, (N, C, H, W) -> (N, C)
+        return x
+    
+    def forward_head(self, x):
+        x = self.norm(x.mean([-2, -1])) # global average pooling, (N, C, H, W) -> (N, C)
+        x = self.head(x)
+        return x # (B, C_out)
 
     def forward(self, x):
         x = self.forward_features(x)
-        x = self.head(x)
+        x = self.forward_head(x)
         return x
 
 class LayerNorm(nn.Module):
@@ -242,8 +247,8 @@ class FPN(nn.Module):
 
     def forward(self, feats):
         """
-        feats: list of feature maps, 從深到淺 or 淺到深都可以
-        假設進來的順序是 [C2, C3, C4, C5] (淺 -> 深)
+        feats: list of feature maps, 假設順序 [C2, C3, C4, C5] (淺 -> 深)
+        回傳: fused feature map [B, out_channels, H, W]
         """
         # 先把順序改成深 -> 淺，比較好做 top-down
         feats = feats[::-1]  # [C5, C4, C3, C2]
@@ -251,6 +256,7 @@ class FPN(nn.Module):
 
         prev = None
         for idx, x in enumerate(feats):
+            # 注意：這裡用 len(feats)-1-idx 是對應原本順序
             lateral = self.lateral_convs[len(feats) - 1 - idx](x)
             if prev is None:
                 y = lateral
@@ -266,9 +272,8 @@ class FPN(nn.Module):
         results = results[::-1]  # [P2, P3, P4, P5]
 
         if self.fuse_type == "sum":
-            # 直接選一個層（例如最後一層 P3/P4/P5）給 head 用
-            # 或者你要多尺度都回傳也可以
-            return results   # 回傳 list
+            fuse = results[0]
+            return fuse  # 直接回最淺的 feature map
         elif self.fuse_type == "concat":
             # 先把全部 resize 成同一個空間，再 concat
             target_size = results[0].shape[-2:]
@@ -276,7 +281,7 @@ class FPN(nn.Module):
                 F.interpolate(f, size=target_size, mode="nearest")
                 for f in results
             ]
-            fused = torch.cat(resized, dim=1)  # [B, C*L, H, W]
+            fused = torch.cat(resized, dim=1)  # [B, C*out_levels, H, W]
             fused = self.fuse_conv(fused)      # [B, out_channels, H, W]
             return fused                        # 直接回 fused feature
 
@@ -287,86 +292,67 @@ class ConvNeXtFlexible(nn.Module):
         mode: str = "cls",          # "cls", "fpn", "multi_gap"
         fpn_levels=(1, 2, 3),       
         fpn_out_channels=256,
-        fpn_fuse_type="sum",        
-        num_classes=1000,
+        fpn_fuse_type="sum",
     ):
         super().__init__()
         assert mode in ["cls", "fpn", "multi_gap"]
         self.mode = mode
         self.backbone = backbone
         self.fpn_levels = fpn_levels
-        self.out_dim = None
         
         if mode == "cls":
-            self.head = backbone.head 
+            self.out_channels = backbone.dims[-1]
         
         elif mode == "multi_gap":
-            # --- Multi-GAP 初始化 ---
             in_dims = [backbone.dims[i] for i in fpn_levels]
+            self.in_dims = in_dims
             self.ln_each = nn.ModuleList([nn.LayerNorm(d) for d in in_dims])
-            concat_dim = sum(in_dims)
-            self.ln_final = nn.LayerNorm(concat_dim)
-            self.head = nn.Linear(concat_dim, num_classes)
-            self.out_dim = concat_dim
+            self.concat_dim = sum(in_dims)
+            self.ln_final = nn.LayerNorm(self.concat_dim)
+            self.out_channels = self.concat_dim  # map = [B, C_concat, 1, 1]
             
         elif mode == "fpn":
-            # --- FPN 初始化 ---
             in_channels_list = [backbone.dims[i] for i in fpn_levels]
             self.neck = FPN(
                 in_channels_list=in_channels_list,
                 out_channels=fpn_out_channels,
                 fuse_type=fpn_fuse_type,
             )
-            self.norm = nn.LayerNorm(fpn_out_channels)
-            self.head = nn.Linear(fpn_out_channels, num_classes)
-            self.fpn_out_channels = fpn_out_channels
-            self.out_dim = fpn_out_channels
+            self.out_channels = fpn_out_channels
 
-    def get_feature_vector(self, x):
+    def get_feature_map(self, x):
         """
-        ⭐ 核心修改：統一的特徵提取接口
-        根據 mode 自動切換路徑，回傳 [B, Feature_Dim] 的特徵向量
+        根據 mode，回傳 [B, C_out, H, W] 的 feature map
         """
-        # 1. CLS 模式直接回傳 backbone 最後一層特徵
+        # 1) CLS 模式：用最後一層 feature 當 feature map
         if self.mode == "cls":
-            return self.backbone.forward_features(x)
+            feat = self.backbone.forward_features(x)  # [B, C, H, W]
+            return feat
 
-        # 2. 取得多層特徵 (Multi-Stage Features)
-        stage_feats = self.backbone.forward_stages(x)   # [C2, C3, C4, C5]
+        # 2) 多 stage features
+        stage_feats = self.backbone.forward_stages(x)   # list: [C2, C3, C4, C5]，每個 [B, Ci, Hi, Wi]
         selected_feats = [stage_feats[i] for i in self.fpn_levels]
 
-        # 3. Multi-GAP 邏輯
-        if self.mode == "multi_gap":
+        if self.mode == "fpn":
+            fused = self.neck(selected_feats)           # [B, fpn_out_channels, H, W]
+            return fused
+        
+        elif self.mode == "multi_gap":
+            # GAP + LN per level → concat → LN 
             pooled = []
             for idx, f in enumerate(selected_feats):
-                g = f.mean(dim=[2, 3])           # GAP → (B, Ci)
-                g = self.ln_each[idx](g)         # LayerNorm per level
+                g = f.mean(dim=[2, 3])           # [B, Ci]
+                g = self.ln_each[idx](g)
                 pooled.append(g)
             
-            feat = torch.cat(pooled, dim=1)      # (B, sum(Ci))
-            feat = self.ln_final(feat)           # LayerNorm after concat
-            return feat
-
-        # 4. FPN 邏輯
-        elif self.mode == "fpn":
-            fused = self.neck(selected_feats)    # FPN Fusion
-            
-            # 如果 FPN 回傳 list (sum 模式)，取最後一層；如果是 concat 模式則直接是 tensor
-            if isinstance(fused, list):
-                fused_feat = fused[-1]
-            else:
-                fused_feat = fused
-
-            feat = fused_feat.mean(dim=[2, 3])   # GAP → [B, C]
-            feat = self.norm(feat)               # LayerNorm
-            return feat
+            feat_vec = torch.cat(pooled, dim=1)  # [B, sum(Ci)]
+            feat_vec = self.ln_final(feat_vec)   # [B, C_concat]
+            feat_map = feat_vec.unsqueeze(-1).unsqueeze(-1)  # ⭐ [B, C_concat, 1, 1]
+            return feat_map
 
     def forward(self, x):
-        """
-        原本的 forward 現在變得很乾淨，只負責接 Head
-        """
-        feat = self.get_feature_vector(x)
-        out = self.head(feat)
+        feat_map = self.get_feature_vector(x)   # [B, C, H, W]
+        out = self.head(feat_map)               # HeadAdapter 自己決定 1D/2D 處理
         return out
 
 model_urls = {

@@ -4,11 +4,7 @@ torch.serialization.add_safe_globals([argparse.Namespace])
 import torch.nn as nn
 import torchvision.models as models
 
-from models.head import (
-    HeadAdapter,
-    DirectRegressionHead,
-    SimCCHead
-)
+from models.head import HeadAdapter
 
 from models.efficientnet.efficientnetv2_torch_custom import (
     EfficientNetWithTransformer,
@@ -27,7 +23,7 @@ from models.efficientnet.efficientnetv2_torch_custom import (
 
 from models.convnextv1.convnext_custom import (
     ConvNeXtSmallCustom,
-    ConvNeXtSmallMS
+    ConvNeXtSmallMS,
 )
 
 from models.convnextv1.convnextv1_torch_custom import (
@@ -91,7 +87,7 @@ MODEL = {
     
     # 基於官方實作的 ConvNeXt 系列模型。
     
-    "convnext_small_mg234": ConvNeXtSmallMS, # 基於官方庫實作的 Multi-Scale ConvNeXt-Small
+    "convnext_small_mg1234": ConvNeXtSmallMS, # 基於官方庫實作的 Multi-Scale ConvNeXt-Small
     "convnext_small_custom": ConvNeXtSmallCustom,
     "convnext_v2_tiny": ConvNeXtV2Tiny,
     "convnext_v2_base": ConvNeXtV2Base,
@@ -114,7 +110,7 @@ MODEL = {
     "hrnet_w48": HRNetW48Custom,
 }
 
-def initialize_model(model_name, num_points, head_type="direct_regression", Nx=None, Ny=None, **kwargs):
+def initialize_model(model_name, num_points, head_type="direct_regression", input_size=None, Nx=None, Ny=None, **kwargs):
     model_name = model_name.lower()
 
     if model_name not in MODEL:
@@ -123,6 +119,7 @@ def initialize_model(model_name, num_points, head_type="direct_regression", Nx=N
     return MODEL[model_name](
         num_points=num_points,
         head_type=head_type,
+        input_size=input_size,
         Nx=Nx,
         Ny=Ny,
         **kwargs

@@ -10,6 +10,7 @@ from models.convnextv2.convnextv2 import (
 class ConvNeXtV2Tiny(nn.Module):
     def __init__(self, num_points,
                  head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),
                  Nx=None, Ny=None):
         super().__init__()
 
@@ -36,6 +37,7 @@ class ConvNeXtV2Tiny(nn.Module):
 class ConvNeXtV2Base(nn.Module):
     def __init__(self, num_points,
                  head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),
                  Nx=None, Ny=None):
         super().__init__()
 
@@ -61,6 +63,7 @@ class ConvNeXtV2Base(nn.Module):
 class ConvNeXtV2Large(nn.Module):
     def __init__(self, num_points,
                  head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),
                  Nx=None, Ny=None):
         super().__init__()
 
