@@ -87,7 +87,7 @@ MODEL = {
     
     # 基於官方實作的 ConvNeXt 系列模型。
     
-    "convnext_small_mg1234": ConvNeXtSmallMS, # 基於官方庫實作的 Multi-Scale ConvNeXt-Small
+    "convnext_small_fpn1234concat": ConvNeXtSmallMS, # 基於官方庫實作的 Multi-Scale ConvNeXt-Small
     "convnext_small_custom": ConvNeXtSmallCustom,
     "convnext_v2_tiny": ConvNeXtV2Tiny,
     "convnext_v2_base": ConvNeXtV2Base,

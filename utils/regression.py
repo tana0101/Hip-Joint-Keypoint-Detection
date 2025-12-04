@@ -1,7 +1,6 @@
 import torch
-POINTS_COUNT = 6
 
-def extend_with_center_points_side(outputs, keypoints):
+def extend_with_center_points_side(outputs, keypoints, points_count):
     """
     outputs/keypoints:
       - 如果是 tensor: [B, P*2] 或 [B, P, 2]
@@ -18,7 +17,7 @@ def extend_with_center_points_side(outputs, keypoints):
 
     # 如果是 [B, P*2] 先 reshape
     if outputs.dim() == 2:
-        outputs = outputs.view(B, POINTS_COUNT, 2)
+        outputs = outputs.view(B, points_count, 2)
     elif outputs.dim() == 3:
         # 假設已經是 [B, P, 2]
         pass
@@ -26,7 +25,7 @@ def extend_with_center_points_side(outputs, keypoints):
         raise ValueError(f"Unexpected outputs shape: {outputs.shape}")
 
     if keypoints.dim() == 2:
-        keypoints = keypoints.view(B, POINTS_COUNT, 2)
+        keypoints = keypoints.view(B, points_count, 2)
     elif keypoints.dim() == 3:
         pass
     else:
@@ -40,8 +39,8 @@ def extend_with_center_points_side(outputs, keypoints):
 
     return outputs_extended, keypoints_extended
 
-def compute_loss_direct_regression(outputs, keypoints, criterion):
+def compute_loss_direct_regression(outputs, keypoints, points_count, criterion):
     # Combine the center points with the original outputs and keypoints
-    outputs_extended, keypoints_extended = extend_with_center_points_side(outputs, keypoints)
+    outputs_extended, keypoints_extended = extend_with_center_points_side(outputs, keypoints, points_count)
     loss = criterion(outputs_extended, keypoints_extended)
     return loss
