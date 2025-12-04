@@ -6,8 +6,9 @@ from models.head import HeadAdapter
 
 class EfficientNetWithTransformer(nn.Module):
     def __init__(self, num_points: int, head_type: str,
-                 image_size: int = 224, hidden_dim: int = 256,
+                 hidden_dim: int = 256,
                  num_heads: int = 4, num_layers: int = 1,
+                 input_size: tuple[int, int] = (224, 224),
                  Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
@@ -46,8 +47,9 @@ class EfficientNetWithTransformer(nn.Module):
 
 class EfficientNetMidWithTransformer(nn.Module):
     def __init__(self, num_points: int, head_type: str,
-                 image_size: int = 224, hidden_dim: int = 256,
+                 hidden_dim: int = 256,
                  num_heads: int = 4, num_layers: int = 1,
+                 input_size: tuple[int, int] = (224, 224),
                  Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
@@ -114,8 +116,9 @@ class PatchTransformer(nn.Module):
 # ---- 多尺度 + Transformer (4 scales) ----
 class EfficientNetMultiScaleTransformer_4scales_GAPConcat(nn.Module):
     def __init__(self, num_points: int, head_type: str,
-                 image_size: int = 224, hidden_dim: int = 256,
+                 hidden_dim: int = 256,
                  num_heads: int = 4, num_layers: int = 1,
+                 input_size: tuple[int, int] = (224, 224),
                  Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
@@ -150,8 +153,9 @@ class EfficientNetMultiScaleTransformer_4scales_GAPConcat(nn.Module):
 # ---- 多尺度 + Transformer (3 scales) ----
 class EfficientNetMultiScaleTransformer_3scales_GAPConcat(nn.Module):
     def __init__(self, num_points: int, head_type: str,
-                 image_size: int = 224, hidden_dim: int = 256,
+                 hidden_dim: int = 256,
                  num_heads: int = 4, num_layers: int = 1,
+                 input_size: tuple[int, int] = (224, 224),
                  Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
@@ -179,7 +183,9 @@ class EfficientNetMultiScaleTransformer_3scales_GAPConcat(nn.Module):
         return self.kp_head(z)
 
 class EfficientNetWithCBAM(nn.Module):
-    def __init__(self, num_points: int, head_type: str, Nx: int = None, Ny: int = None):
+    def __init__(self, num_points: int, head_type: str, 
+                 input_size: tuple[int, int] = (224, 224),
+                 Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
         self.backbone = base.features
@@ -198,7 +204,9 @@ class EfficientNetWithCBAM(nn.Module):
         return self.kp_head(z)
 
 class EfficientNetMultiScaleCBAM_4scales_GAPConcat(nn.Module):
-    def __init__(self, num_points: int, head_type: str, Nx: int = None, Ny: int = None):
+    def __init__(self, num_points: int, head_type: str, 
+                 input_size: tuple[int, int] = (224, 224),
+                 Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
         feats = base.features
@@ -224,7 +232,9 @@ class EfficientNetMultiScaleCBAM_4scales_GAPConcat(nn.Module):
         return self.kp_head(z)
 
 class EfficientNetMultiScaleCBAM_3scales_GAPConcat(nn.Module):
-    def __init__(self, num_points: int, head_type: str, Nx: int = None, Ny: int = None):
+    def __init__(self, num_points: int, head_type: str, 
+                 input_size: tuple[int, int] = (224, 224),
+                 Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
         feats = base.features
@@ -270,7 +280,9 @@ class ScaleHead(nn.Module):
         return y
 
 class EfficientNetMultiScaleCBAM_3scales_GatedFusion(nn.Module):
-    def __init__(self, num_points: int, head_type: str, embed_dim: int = 128, Nx: int = None, Ny: int = None):
+    def __init__(self, num_points: int, head_type: str, embed_dim: int = 128, 
+                 input_size: tuple[int, int] = (224, 224),
+                 Nx: int = None, Ny: int = None):
         super().__init__()
         base  = models.efficientnet_v2_m(pretrained=True)
         feats = base.features
@@ -300,8 +312,9 @@ class EfficientNetMultiScaleCBAM_3scales_GatedFusion(nn.Module):
 
 class EfficientNetCBAMTransformer(nn.Module):
     def __init__(self, num_points: int, head_type: str,
-                 image_size: int = 224, hidden_dim: int = 256,
+                 hidden_dim: int = 256,
                  num_heads: int = 4, num_layers: int = 1,
+                 input_size: tuple[int, int] = (224, 224),
                  Nx: int = None, Ny: int = None):
         super().__init__()
         base = models.efficientnet_v2_m(pretrained=True)
@@ -395,6 +408,7 @@ class MSDecoder(nn.Module):
 class EfficientNetMultiScale_3scales_CrossAttn(nn.Module):
     def __init__(self, num_points: int, head_type: str,
                  hidden: int = 256, nhead: int = 4, nlayers: int = 1,
+                 input_size: tuple[int, int] = (224, 224),
                  Nx: int = None, Ny: int = None):
         super().__init__()
         base  = models.efficientnet_v2_m(pretrained=True)
@@ -424,7 +438,9 @@ class EfficientNet(nn.Module):
     """
     取代原 classifier：輸出展平成向量 z，再交給 HeadAdapter
     """
-    def __init__(self, num_points: int, head_type: str, Nx: int = None, Ny: int = None):
+    def __init__(self, num_points: int, head_type: str, 
+                 input_size: tuple[int, int] = (224, 224),
+                 Nx: int = None, Ny: int = None):
         super().__init__()
         model = models.efficientnet_v2_m(pretrained=True)
         in_features = model.classifier[1].in_features
@@ -444,7 +460,9 @@ class EfficientNet_FC2048(nn.Module):
     """
     保留你原本的中介 MLP(到 2048)，但最後輸出 z 再交給 HeadAdapter
     """
-    def __init__(self, num_points: int, head_type: str, Nx: int = None, Ny: int = None):
+    def __init__(self, num_points: int, head_type: str, 
+                 input_size: tuple[int, int] = (224, 224),
+                 Nx: int = None, Ny: int = None):
         super().__init__()
         model = models.efficientnet_v2_m(pretrained=True)
         in_features = model.classifier[1].in_features

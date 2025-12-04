@@ -7,6 +7,7 @@ from models.head import HeadAdapter
 class MambaVisionSmall(nn.Module):
     def __init__(self, num_points,
                  head_type: str = "direct_regression",
+                 input_size: tuple[int, int] = (224, 224),
                  Nx: int = None, Ny: int = None):
         super().__init__()
 

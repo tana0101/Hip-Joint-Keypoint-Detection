@@ -271,6 +271,21 @@ class MirroredToSideDataset(Dataset):
         k_out = k_xy.reshape(-1)                  # 還原為 (12,)
         return image_flipped, k_out, crop_size
 
+class GraphWrapper(nn.Module):
+    def __init__(self, model, head_type):
+        super().__init__()
+        self.model = model
+        self.head_type = head_type
+
+    def forward(self, x):
+        out = self.model(x)
+        if isinstance(out, dict):
+            if self.head_type == "direct_regression":
+                return out["coords"]       # [B, J, 2]
+            else:
+                return out["logits_x"]     # simcc 系列就挑一個輸出給 tracer
+        return out
+
 def calculate_nme(preds, targets, img_size):
     """
     NME in crop space.
@@ -427,10 +442,10 @@ def build_experiment_name(
     """
     base = f"{model_name}_{head_type}"
 
-    # 只有 simcc 才會加 sr 跟 sigma
-    if head_type == "simcc" and split_ratio is not None:
+    # 只有 simcc 系列 head 才會加 sr 跟 sigma
+    if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] and split_ratio is not None:
         base += f"_sr{split_ratio}"
-    if head_type == "simcc" and sigma is not None:
+    if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] and sigma is not None:
         base += f"_sigma{sigma}"
 
     base += f"_crop{side}"
@@ -440,6 +455,37 @@ def build_experiment_name(
     # 統一後面這四個
     base += f"_{input_size}_{epochs}_{learning_rate}_{batch_size}"
     return base
+
+def get_preds_and_targets(outputs, keypoints, head_type, Nx, Ny, input_size):
+    """
+    根據 head_type，把模型輸出轉成 xy 座標，並回傳 numpy 版的 preds / targets
+
+    outputs:
+      - direct_regression: {"type": "direct_regression", "coords": [B, J, 2]}
+      - simcc_xxx: {"type": "...", "logits_x": [B,J,Nx], "logits_y": [B,J,Ny]}
+    keypoints:
+      - tensor, [B, J, 2] or [B, J*2] (你自己前面應該已經整理好)
+
+    回傳:
+      preds_np:   (B, J, 2)
+      targets_np: (B, J, 2)
+    """
+    if head_type == "direct_regression":
+        preds = outputs["coords"]                  # [B, J, 2]
+    elif head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
+        pred_x = outputs["logits_x"]
+        pred_y = outputs["logits_y"]
+        preds = decode_simcc_to_xy(
+            pred_x, pred_y,
+            Nx=Nx, Ny=Ny,
+            input_size=input_size,
+        )                                          # [B, J, 2]
+    else:
+        raise ValueError(f"Unknown head_type={head_type}")
+
+    preds_np = preds.detach().cpu().numpy()
+    targets_np = keypoints.detach().cpu().numpy()
+    return preds_np, targets_np
 
 def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror, head_type="direct_regression", split_ratio=2, sigma=6.0):
     transform = transforms.Compose([
@@ -510,13 +556,13 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     print(f"[{side.upper()}] Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
     
     # Initialize the model, loss function, and optimizer
-    if head_type == "simcc":
+    if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
         Nx = int(input_size * split_ratio)
         Ny = int(input_size * split_ratio)
     else:
         Nx = None
         Ny = None
-    model = initialize_model(model_name, POINTS_COUNT, head_type=head_type, Nx=Nx, Ny=Ny)
+    model = initialize_model(model_name, POINTS_COUNT, head_type=head_type, input_size=(input_size, input_size), Nx=Nx, Ny=Ny)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -524,7 +570,7 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
         def loss_fn(outputs, keypoints):
             criterion = nn.MSELoss()
             return compute_loss_direct_regression(outputs, keypoints, criterion)
-    elif head_type == "simcc":
+    elif head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
         def loss_fn(outputs, keypoints):
             return compute_loss_simcc(
                 outputs,
@@ -579,10 +625,11 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     writer = SummaryWriter(log_dir=tb_dir)
     try:
         dummy = torch.randn(1, 3, input_size, input_size, device=device)
-        writer.add_graph(model, dummy)
+        graph_model = GraphWrapper(model, head_type)
+        writer.add_graph(graph_model, dummy)
     except Exception as e:
         print(f"[TB] Skip add_graph: {e}")
-
+        
     global_step = 0
 
     for epoch in range(epochs):
@@ -605,13 +652,15 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
             
             running_loss += loss.item()
 
-            if head_type == "direct_regression":
-                preds = outputs.detach().cpu().numpy()
-            elif head_type == "simcc":
-                pred_x, pred_y = outputs
-                preds = decode_simcc_to_xy(pred_x, pred_y, Nx=Nx, Ny=Ny, input_size=input_size)
-                preds = preds.detach().cpu().numpy()
-            targets = keypoints.detach().cpu().numpy()
+            
+            preds, targets = get_preds_and_targets(
+                outputs=outputs,
+                keypoints=keypoints,
+                head_type=head_type,
+                Nx=Nx,
+                Ny=Ny,
+                input_size=input_size,
+            )
             
             # Unpack the original image sizes
             widths, heights = crop_sizes
@@ -654,14 +703,15 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
                 loss = loss_fn(outputs, keypoints)
                 val_loss += loss.item()
 
-                if head_type == "direct_regression":
-                    preds = outputs.detach().cpu().numpy()
-                elif head_type == "simcc":
-                    pred_x, pred_y = outputs
-                    preds = decode_simcc_to_xy(pred_x, pred_y, Nx=Nx, Ny=Ny, input_size=input_size)
-                    preds = preds.detach().cpu().numpy()
-                targets = keypoints.detach().cpu().numpy()
-                
+                preds, targets = get_preds_and_targets(
+                    outputs=outputs,
+                    keypoints=keypoints,
+                    head_type=head_type,
+                    Nx=Nx,
+                    Ny=Ny,
+                    input_size=input_size,
+                )
+
                 # Unpack the original image sizes
                 widths, heights = crop_sizes
                 widths = widths.cpu().numpy()  
@@ -711,8 +761,8 @@ def main(data_dir, model_name, input_size, epochs, learning_rate, batch_size, si
     hparam_dict = {
         "model": model_name,
         "head_type": head_type,
-        "sr": split_ratio if head_type == "simcc" else 1.0,
-        "sigma": sigma if head_type == "simcc" else None,
+        "sr": split_ratio if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] else 1.0,
+        "sigma": sigma if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] else None,
         "side": side,
         "mirror": int(mirror),
         "epochs": epochs,
@@ -763,7 +813,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=8, help="Number of samples per batch")
     parser.add_argument("--side", type=str, default="left", choices=["left", "right"], help="Side to train on: 'left' or 'right'")
     parser.add_argument("--mirror", action="store_true", help="Whether to include mirrored data from the opposite side")
-    parser.add_argument("--head_type", type=str, default="direct_regression", choices=["direct_regression", "simcc"], help="Which keypoint head to use")
+    parser.add_argument("--head_type", type=str, default="direct_regression", choices=["direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv"], help="Type of model head to use")
     parser.add_argument("--split_ratio", type=float, default=2, help="Validation split ratio")
     parser.add_argument("--sigma", type=float, default=6.0, help="Sigma for SimCC label encoding")
     

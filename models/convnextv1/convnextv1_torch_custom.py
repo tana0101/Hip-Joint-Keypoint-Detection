@@ -7,6 +7,7 @@ from models.head import HeadAdapter
 class ConvNeXtWithCBAM(nn.Module):
     def __init__(self, num_points: int,
                  head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),
                  Nx=None, Ny=None,
                  pretrained=True):
         super().__init__()
@@ -40,8 +41,8 @@ class ConvNeXtWithCBAM(nn.Module):
 class ConvNeXtWithTransformer(nn.Module):
     def __init__(self, num_points: int,
                  head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),  
                  Nx=None, Ny=None,
-                 image_size=224,
                  hidden_dim=256,
                  num_heads=4,
                  num_layers=1,
@@ -101,7 +102,9 @@ class ConvNeXtWithTransformer(nn.Module):
     
 class ConvNeXtTiny(nn.Module):
     def __init__(self, num_points,
-                 head_type="direct_regression", Nx=None, Ny=None,
+                 head_type="direct_regression", 
+                 input_size: tuple[int, int] = (224, 224),  
+                 Nx=None, Ny=None,
                  pretrained=True):
         super().__init__()
         model = models.convnext_tiny(pretrained=pretrained)
@@ -117,7 +120,9 @@ class ConvNeXtTiny(nn.Module):
     
 class ConvNeXtSmall(nn.Module):
     def __init__(self, num_points,
-                 head_type="direct_regression", Nx=None, Ny=None,
+                 head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),  
+                 Nx=None, Ny=None,
                  pretrained=True):
         super().__init__()
         model = models.convnext_small(pretrained=pretrained)
@@ -133,7 +138,9 @@ class ConvNeXtSmall(nn.Module):
     
 class ConvNeXtBase(nn.Module):
     def __init__(self, num_points,
-                 head_type="direct_regression", Nx=None, Ny=None,
+                 head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),  
+                 Nx=None, Ny=None,
                  pretrained=True):
         super().__init__()
         model = models.convnext_base(pretrained=pretrained)
@@ -149,7 +156,9 @@ class ConvNeXtBase(nn.Module):
     
 class ConvNeXtLarge(nn.Module):
     def __init__(self, num_points,
-                 head_type="direct_regression", Nx=None, Ny=None,
+                 head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),  
+                 Nx=None, Ny=None,
                  pretrained=True):
         super().__init__()
         model = models.convnext_large(pretrained=pretrained)
