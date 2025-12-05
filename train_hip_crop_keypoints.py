@@ -12,10 +12,7 @@ import math
 from datasets.transforms import get_hip_base_transform
 from datasets.hip_crop_keypoints import HipCropKeypointDataset, MirroredToSideDataset
 from datasets.augment import AugmentedKeypointDataset
-from utils.keypoint_metrics import (
-    calculate_nme,
-    calculate_pixel_error
-)
+from utils.keypoint_metrics import calculate_nme, calculate_pixel_error
 from utils.keypoints import get_preds_and_targets
 from utils.experiment import build_experiment_name
 from utils.train_vis import GraphWrapper, plot_training_progress

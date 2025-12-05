@@ -6,7 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import re
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, r2_score
+from sklearn.metrics import (
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    accuracy_score,
+    r2_score,
+)
 from scipy.stats import pearsonr, spearmanr, kendalltau
 from ultralytics import YOLO
 
@@ -845,4 +850,4 @@ if __name__ == "__main__":
     )
 
 # 單側模型預測
-# python3 predict_hip_crop_keypoints.py --model_name convnext_small_fpn1234concat --kp_left_path results/25_simcc/convnext_small_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights weights/yolo12s.pt --data "data/test" --output_dir "results"
+# python3 predict_hip_crop_keypoints.py --model_name convnext_small_fpn1234concat --kp_left_path results/25_simcc/convnext_small_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
