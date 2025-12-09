@@ -471,7 +471,7 @@ def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
     else:
         plt.show()
 
-def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir):
+def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir, fold_index=None):
     
     # 0) 以存在的模型路徑擷取紀錄資訊
     use_left  = (kp_left_path  is not None) and (str(kp_left_path).strip()  != "")
@@ -537,7 +537,10 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         exp_name = f"{model_name}_{head_type}_sr{split_ratio}_sigma{sigma}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}"
     else:
         exp_name = f"{model_name}_{head_type}_{crop_side}_{input_size}_{epochs}_{learning_rate}_{batch_size}"
-    result_dir = os.path.join(output_dir, exp_name)
+    if fold_index is not None:
+        result_dir = os.path.join(output_dir) # kfold模式不需額外建立子資料夾
+    else:
+        result_dir = os.path.join(output_dir, exp_name)
     os.makedirs(result_dir, exist_ok=True)
 
     # 建立裁切輸出資料夾
@@ -884,6 +887,7 @@ if __name__ == "__main__":
     parser.add_argument("--yolo_weights", type=str, required=True, help="YOLO weights (e.g., best.pt)")
     parser.add_argument("--data", type=str, required=True, help="data directory")
     parser.add_argument("--output_dir", type=str, default="results", help="output directory")
+    parser.add_argument("--fold_index", type=int, default=None, help="fold index for k-fold cross-validation (optional)")
     args = parser.parse_args()
 
     predict(

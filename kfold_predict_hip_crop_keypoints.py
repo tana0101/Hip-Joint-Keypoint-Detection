@@ -116,6 +116,7 @@ def main():
             yolo_path,
             data_dir,
             fold_output_dir,
+            fold_index=fold_idx,
         )
         metrics["fold_index"] = fold_idx
         all_fold_metrics.append(metrics)
@@ -175,7 +176,7 @@ def main():
     # ===================================================
     #  全部 folds 的 raw list 聚合：建立「全照片統計與圖」
     # ===================================================
-    all_folds_summary_dir = os.path.join(output_root, exp_name, "all_folds_summary")
+    all_folds_summary_dir = os.path.join(output_root, exp_name, "summary")
     os.makedirs(all_folds_summary_dir, exist_ok=True)
 
     # ---- 1) 把所有 folds 的 per-image lists 接起來 ----
@@ -219,7 +220,7 @@ def main():
     plt.ylabel("Count")
     plt.title("Histogram of Avg Distances (All folds)")
     plt.tight_layout()
-    hist_dist_path = os.path.join(all_folds_summary_dir, f"{exp_name}_all_avg_distances_hist.png")
+    hist_dist_path = os.path.join(all_folds_summary_dir, "all_avg_distances_hist.png")
     plt.savefig(hist_dist_path, dpi=300)
     plt.close()
 
@@ -231,7 +232,7 @@ def main():
     plt.ylabel("Count")
     plt.title("Histogram of Avg AI Angle Error (All folds)")
     plt.tight_layout()
-    hist_ai_path = os.path.join(all_folds_summary_dir, f"{exp_name}_all_ai_error_hist.png")
+    hist_ai_path = os.path.join(all_folds_summary_dir, "all_ai_error_hist.png")
     plt.savefig(hist_ai_path, dpi=300)
     plt.close()
 
@@ -239,7 +240,7 @@ def main():
     ai_gt_all = np.concatenate([np.asarray(all_ai_left_gt, float), np.asarray(all_ai_right_gt, float)], axis=0)
     ai_pred_all = np.concatenate([np.asarray(all_ai_left_pred, float), np.asarray(all_ai_right_pred, float)], axis=0)
 
-    scatter_overall_path = os.path.join(all_folds_summary_dir, f"{exp_name}_scatter_overall_ai_angle.png")
+    scatter_overall_path = os.path.join(all_folds_summary_dir, "scatter_overall_ai_angle.png")
     plot_ai_angle_scatter(
         ai_gt_all,
         ai_pred_all,
@@ -258,7 +259,7 @@ def main():
     )
 
     # ---- 6) Pixel vs Angle error (global) ----
-    pixel_vs_angle_path = os.path.join(all_folds_summary_dir, f"{exp_name}_scatter_pixel_vs_angle_error_all.png")
+    pixel_vs_angle_path = os.path.join(all_folds_summary_dir, "scatter_pixel_vs_angle_error_all.png")
     plot_pixel_vs_angle_error(
         pixel_errors=all_dist,
         ai_errors_avg=all_ai_err_avg,
@@ -271,8 +272,8 @@ if __name__ == "__main__":
 
 """
 python kfold_predict_hip_crop_keypoints.py \
-  --model_name convnext_small_custom \
-  --kp_left_tpl "weights/convnext_small_custom_direct_regression_cropleft_mirror_224_200_0.0001_32_fold{fold}_best.pth" \
+  --model_name convnext_small_fpn1234concat \
+  --kp_left_tpl "weights/convnext_small_fpn1234concat_simcc_cropleft_mirror_224_200_0.0001_32_fold{fold}_best.pth" \
   --yolo_weights weights/yolo12s_fold{fold}.pt \
   --data_root data \
   --k 5 \
