@@ -43,9 +43,9 @@ if __name__ == "__main__":
 '''
 python train_yolo.py \
   --model yolo12m.pt \
-  --data data/data.yaml \
+  --data data/data_fold1.yaml \
   --epochs 300 --imgsz 640 --batch 8 --device 0 \
-  --project runs/train --name yolo12m_run --pretrained --seed 42 \
+  --project runs/train --name yolo12m_fold1 --pretrained --seed 42 \
   --fliplr 0.0 --flipud 0.0 --degrees 5.0 \
   --shear 0.0 --perspective 0.0 --mosaic 0.0 --mixup 0.0
 '''

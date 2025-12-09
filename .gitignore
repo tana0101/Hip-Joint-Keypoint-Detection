@@ -4,3 +4,4 @@ logs/tb/
 events.out.tfevents.*
 *__pycache__/
 *.pyc
+kfold_tmp/
