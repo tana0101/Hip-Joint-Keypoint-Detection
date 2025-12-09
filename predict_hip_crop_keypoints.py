@@ -222,7 +222,6 @@ def extract_info_from_model_path(model_path):
         r'_([0-9]+)'                          # group(6): epochs
         r'_([0-9eE\.\-]+)'                    # group(7): learning_rate
         r'_([0-9]+)'                          # group(8): batch_size
-        r'(?:_best\.pth)?$'                   # optional _best.pth
     )
 
     m = pattern_simcc.search(filename)
@@ -246,7 +245,6 @@ def extract_info_from_model_path(model_path):
         r'_([0-9]+)'                          # group(4): epochs
         r'_([0-9eE\.\-]+)'                    # group(5): learning_rate
         r'_([0-9]+)'                          # group(6): batch_size
-        r'(?:_best\.pth)?$'                   # optional _best.pth
     )
 
     m2 = pattern_dr.search(filename)
@@ -580,8 +578,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             W, H = image_pil.size
             
             # 3-1) YOLO 偵測 left/right
-            box_left  = _detect_one(yolo_model, image_pil, cls_id=0, conf=0.001, iou=0.7)
-            box_right = _detect_one(yolo_model, image_pil, cls_id=1, conf=0.001, iou=0.7)
+            box_left  = _detect_one(yolo_model, image_pil, cls_id=YOLO_LEFT_CLS,  conf=YOLO_CONF, iou=YOLO_IOU)
+            box_right = _detect_one(yolo_model, image_pil, cls_id=YOLO_RIGHT_CLS, conf=YOLO_CONF, iou=YOLO_IOU)
 
             if (box_left is None) or (box_right is None):
                 print(f"[WARN] {image_file}: missing detection (left={box_left is not None}, right={box_right is not None}), skip.")
@@ -590,7 +588,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             # 3-2) 調整 bbox → 裁切 → 推論單側 KPs → 還原到原圖
             # Left
             x1,y1,x2,y2 = box_left
-            x1,y1,x2,y2 = _square_expand_clip(x1,y1,x2,y2, W,H, expand=0.10, keep_square=True)
+            x1,y1,x2,y2 = _square_expand_clip(x1,y1,x2,y2, W,H, expand=BBOX_EXPAND, keep_square=True)
             crop_left = image_pil.crop((int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)))).convert("L")
             left_crop_name = os.path.splitext(image_file)[0] + "_left_crop.jpg"
             crop_left.save(os.path.join(crops_left_dir, left_crop_name))
@@ -829,6 +827,54 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     r_pixel, _ = pearsonr(all_avg_distances, ai_errors_avg)
     r2_pixel = r2_score(all_avg_distances, ai_errors_avg)
     print(f"Pixel distance error vs AI angle error correlation: r = {r_pixel:.2f}, r² = {r2_pixel:.2f}")
+
+    metrics = {
+        "exp_name": exp_name,
+        "num_images": len(image_labels),
+
+        # per-image raw lists（之後 K-fold 會用來合併）
+        "all_avg_distances": all_avg_distances,          # list[float]
+        "ai_errors_left": ai_errors_left,                # list[float]
+        "ai_errors_right": ai_errors_right,              # list[float]
+        "ai_left_gt_list": ai_left_gt_list,              # list[float]
+        "ai_left_pred_list": ai_left_pred_list,          # list[float]
+        "ai_right_gt_list": ai_right_gt_list,            # list[float]
+        "ai_right_pred_list": ai_right_pred_list,        # list[float]
+        "left_quadrants_pred": left_preds_all,           # list[str]
+        "left_quadrants_gt": left_gts_all,               # list[str]
+        "right_quadrants_pred": right_preds_all,         # list[str]
+        "right_quadrants_gt": right_gts_all,             # list[str]
+        
+        # pixel distance
+        "mu_dist": mu_dist,
+        "std_dist": std_dist,
+
+        # AI angle error（左右合併的 μ ± σ）
+        "mu_ai_error": mu_err,
+        "std_ai_error": std_err,
+
+        # 左右各自平均 AI error（無 std，std 用 folds 去算）
+        "avg_ai_error_left": avg_error_left,
+        "avg_ai_error_right": avg_error_right,
+
+        # IHDI quadrant classification accuracy
+        "acc_left": acc_left,
+        "acc_right": acc_right,
+        "acc_all": acc_all,
+
+        # AI angle correlations
+        "r_left": r_left,
+        "r2_left": r2_left,
+        "r_right": r_right,
+        "r2_right": r2_right,
+        "r_all": r_all,
+        "r2_all": r2_all,
+
+        # pixel vs angle correlation
+        "r_pixel": r_pixel,
+        "r2_pixel": r2_pixel,
+    }
+    return metrics
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

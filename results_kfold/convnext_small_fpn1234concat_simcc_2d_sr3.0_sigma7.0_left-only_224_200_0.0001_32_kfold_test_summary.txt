@@ -1,0 +1,127 @@
+K-fold test summary for convnext_small_fpn1234concat_simcc_2d_sr3.0_sigma7.0_left-only_224_200_0.0001_32
+k = 5
+
+Fold 1:
+  num_images        = 112
+  acc_all            = 0.888393
+  acc_left           = 0.875000
+  acc_right          = 0.901786
+  avg_ai_error_left  = 1.969112
+  avg_ai_error_right = 2.055195
+  mu_ai_error        = 2.012154
+  mu_dist            = 5.817618
+  num_images         = 112.000000
+  r2_all             = 0.713366
+  r2_left            = 0.728075
+  r2_pixel           = -5.273918
+  r2_right           = 0.693943
+  r_all              = 0.847168
+  r_left             = 0.855074
+  r_pixel            = 0.089373
+  r_right            = 0.843720
+  std_ai_error       = 1.582846
+  std_dist           = 1.717668
+
+Fold 2:
+  num_images        = 112
+  acc_all            = 0.883929
+  acc_left           = 0.892857
+  acc_right          = 0.875000
+  avg_ai_error_left  = 1.815728
+  avg_ai_error_right = 1.938356
+  mu_ai_error        = 1.877042
+  mu_dist            = 5.689872
+  num_images         = 112.000000
+  r2_all             = 0.776516
+  r2_left            = 0.799854
+  r2_pixel           = -7.530571
+  r2_right           = 0.746456
+  r_all              = 0.881954
+  r_left             = 0.899528
+  r_pixel            = 0.381556
+  r_right            = 0.864435
+  std_ai_error       = 1.626037
+  std_dist           = 1.400166
+
+Fold 3:
+  num_images        = 112
+  acc_all            = 0.888393
+  acc_left           = 0.857143
+  acc_right          = 0.919643
+  avg_ai_error_left  = 2.138501
+  avg_ai_error_right = 1.990935
+  mu_ai_error        = 2.064718
+  mu_dist            = 5.795183
+  num_images         = 112.000000
+  r2_all             = 0.720496
+  r2_left            = 0.747200
+  r2_pixel           = -6.702149
+  r2_right           = 0.673764
+  r_all              = 0.850490
+  r_left             = 0.874339
+  r_pixel            = 0.021222
+  r_right            = 0.822096
+  std_ai_error       = 1.696509
+  std_dist           = 1.517813
+
+Fold 4:
+  num_images        = 112
+  acc_all            = 0.888393
+  acc_left           = 0.875000
+  acc_right          = 0.901786
+  avg_ai_error_left  = 1.819937
+  avg_ai_error_right = 1.888516
+  mu_ai_error        = 1.854227
+  mu_dist            = 5.765528
+  num_images         = 112.000000
+  r2_all             = 0.733086
+  r2_left            = 0.772752
+  r2_pixel           = -8.920323
+  r2_right           = 0.666103
+  r_all              = 0.858121
+  r_left             = 0.886205
+  r_pixel            = 0.071071
+  r_right            = 0.844101
+  std_ai_error       = 1.400730
+  std_dist           = 1.346364
+
+Fold 5:
+  num_images        = 111
+  acc_all            = 0.869369
+  acc_left           = 0.828829
+  acc_right          = 0.909910
+  avg_ai_error_left  = 1.893972
+  avg_ai_error_right = 2.123221
+  mu_ai_error        = 2.008596
+  mu_dist            = 5.693538
+  num_images         = 111.000000
+  r2_all             = 0.649024
+  r2_left            = 0.810099
+  r2_pixel           = -5.697741
+  r2_right           = 0.371550
+  r_all              = 0.815530
+  r_left             = 0.908724
+  r_pixel            = 0.424163
+  r_right            = 0.688508
+  std_ai_error       = 2.080807
+  std_dist           = 1.571256
+
+Average ± 1 std across folds:
+  acc_all            = 0.883695 ± 0.008238
+  acc_left           = 0.865766 ± 0.024203
+  acc_right          = 0.901625 ± 0.016600
+  avg_ai_error_left  = 1.927450 ± 0.133641
+  avg_ai_error_right = 1.999245 ± 0.092922
+  mu_ai_error        = 1.963347 ± 0.092279
+  mu_dist            = 5.752348 ± 0.058375
+  num_images         = 111.800000 ± 0.447214
+  r2_all             = 0.718498 ± 0.045923
+  r2_left            = 0.771596 ± 0.034538
+  r2_pixel           = -6.824940 ± 1.464571
+  r2_right           = 0.630363 ± 0.148042
+  r_all              = 0.850653 ± 0.023881
+  r_left             = 0.884774 ± 0.021120
+  r_pixel            = 0.197477 ± 0.189738
+  r_right            = 0.812572 ± 0.070952
+  std_ai_error       = 1.677386 ± 0.250613
+  std_dist           = 1.510654 ± 0.146439

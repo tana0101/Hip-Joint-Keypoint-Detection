@@ -28,7 +28,7 @@ LOGS_DIR = "logs"
 MODELS_DIR = "weights"
 POINTS_COUNT = 6  # 每側6個關鍵點
 
-def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror, head_type="direct_regression", split_ratio=2, sigma=6.0):
+def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror, head_type="direct_regression", split_ratio=2, sigma=6.0, fold_index=None):
     
     points_count = POINTS_COUNT # 每側6個關鍵點
     transform = get_hip_base_transform(input_size)
@@ -158,6 +158,9 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         split_ratio=split_ratio,
         sigma=sigma,
     )
+    if fold_index is not None:
+        exp_name += f"_fold{fold_index}"
+    
     run_name = exp_name
     tb_dir = os.path.join(LOGS_DIR, "tb", run_name)
     writer = SummaryWriter(log_dir=tb_dir)
@@ -277,6 +280,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         if val_pixel_error < best_val_pixel_error:
             best_val_pixel_error = val_pixel_error
             best_model_state = model.state_dict()  # Save the model state at the best point
+            best_epoch_index = epoch
             print(f"---------------- Validation pixel error improved to {best_val_pixel_error:.4f}, saving model. ----------------")
              
         # Log metrics to TensorBoard
@@ -295,6 +299,18 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         torch.save(best_model_state, model_path)
         print(f"Best model saved to: {model_path}")
 
+    # 找出 best epoch 的 train/val metrics（方便 K-fold 平均）
+    if best_epoch_index >= 0:
+        best_train_loss = epoch_losses[best_epoch_index]
+        best_train_nme = epoch_nmes[best_epoch_index]
+        best_train_pixel = epoch_pixel_errors[best_epoch_index]
+        best_val_loss = val_losses[best_epoch_index]
+        best_val_nme = val_nmes[best_epoch_index]
+        best_val_pixel = val_pixel_errors[best_epoch_index]
+    else:
+        best_train_loss = best_train_nme = best_train_pixel = None
+        best_val_loss = best_val_nme = best_val_pixel = None
+    
     # Log hyperparameters and metrics to TensorBoard
     hparam_dict = {
         "model": model_name,
@@ -340,6 +356,24 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
             f.write(f"Epoch {epoch}: Loss = {loss:.4f}, NME = {nme:.4f}, Pixel Error = {pixel_error:.4f}, "
                     f"Val Loss = {val_loss:.4f}, Val NME = {val_nme:.4f}, Val Pixel Error = {val_pixel_error:.4f}\n")
     print(f"Training log saved to: {training_log_path}")
+    
+    return {
+        "epoch_losses": epoch_losses,
+        "val_losses": val_losses,
+        "epoch_nmes": epoch_nmes,
+        "val_nmes": val_nmes,
+        "epoch_pixel_errors": epoch_pixel_errors,
+        "val_pixel_errors": val_pixel_errors,
+        "best_epoch_index": best_epoch_index,
+        "best_val_pixel_error": best_val_pixel_error,
+        "best_train_loss": best_train_loss,
+        "best_train_nme": best_train_nme,
+        "best_train_pixel": best_train_pixel,
+        "best_val_loss": best_val_loss,
+        "best_val_nme": best_val_nme,
+        "best_val_pixel": best_val_pixel,
+        "exp_name": exp_name,
+    }
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -360,5 +394,4 @@ if __name__ == "__main__":
     train(args.data_dir, args.model_name, args.input_size, args.epochs, args.learning_rate,
          args.batch_size, args.side, args.mirror, head_type=args.head_type, split_ratio=args.split_ratio, sigma=args.sigma)
 
-    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --input_size 224 --epochs 300 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc --split_ratio 2
-    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext --input_size 224 --epochs 300 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type direct_regression
+    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext_small_mg1234 --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc_2d --split_ratio 2.0 --sigma 2.0

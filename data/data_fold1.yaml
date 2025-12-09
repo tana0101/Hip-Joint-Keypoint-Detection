@@ -1,0 +1,5 @@
+train: train_fold1.txt
+val: val_fold1.txt
+names:
+  0: hip_left
+  1: hip_right

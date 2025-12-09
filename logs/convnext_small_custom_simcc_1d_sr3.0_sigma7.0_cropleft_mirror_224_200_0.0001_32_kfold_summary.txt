@@ -1,0 +1,27 @@
+K-fold training summary (mode = outer_inner)
+model = convnext_small_custom, side = left, head_type = simcc_1d
+k = 5, epochs = 200
+
+Fold 1: best_epoch = 173
+  train: loss = 0.076045, nme = 0.001685, pixel = 1.982800
+  val  : loss = 0.380667, nme = 0.004599, pixel = 5.228505
+
+Fold 2: best_epoch = 125
+  train: loss = 0.100248, nme = 0.002014, pixel = 2.355631
+  val  : loss = 0.366614, nme = 0.004502, pixel = 5.081110
+
+Fold 3: best_epoch = 121
+  train: loss = 0.099963, nme = 0.002002, pixel = 2.352079
+  val  : loss = 0.363368, nme = 0.004495, pixel = 5.135905
+
+Fold 4: best_epoch = 110
+  train: loss = 0.106767, nme = 0.002100, pixel = 2.453417
+  val  : loss = 0.360510, nme = 0.004409, pixel = 5.050471
+
+Fold 5: best_epoch = 144
+  train: loss = 0.086305, nme = 0.001839, pixel = 2.155014
+  val  : loss = 0.376876, nme = 0.004455, pixel = 5.130735
+
+Average of best-epoch metrics across folds:
+  train: loss = 0.093866, nme = 0.001928, pixel = 2.259788
+  val  : loss = 0.369607, nme = 0.004492, pixel = 5.125345
