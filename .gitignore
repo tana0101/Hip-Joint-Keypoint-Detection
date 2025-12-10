@@ -1,7 +1,11 @@
 *.pth
-logs/tb/
+*.pt
 *.tfevents.*
 events.out.tfevents.*
 *__pycache__/
 *.pyc
 kfold_tmp/
+logs/
+data/
+dataset/
+runs/

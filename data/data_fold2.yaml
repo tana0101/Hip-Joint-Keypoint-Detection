@@ -1,5 +1,0 @@
-train: train_fold2.txt
-val: val_fold2.txt
-names:
-  0: hip_left
-  1: hip_right

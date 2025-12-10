@@ -415,7 +415,7 @@ python kfold_train_hip_crop_keypoints.py \
   --mode outer_inner \
   --inner_val_ratio 0.1 \
   --inner_seed 42 \
-  --model_name hrnet_w48
+  --model_name convnext_small_custom \
   --input_size 224 \
   --epochs 200 \
   --learning_rate 0.0001 \

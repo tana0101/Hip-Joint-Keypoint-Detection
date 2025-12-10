@@ -1,8 +1,0 @@
-train: ./train
-val: ./val
-test: ./test
-
-nc: 2
-names:
-  0: LeftHip
-  1: RightHip
