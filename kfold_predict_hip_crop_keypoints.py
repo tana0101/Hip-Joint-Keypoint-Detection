@@ -272,8 +272,8 @@ if __name__ == "__main__":
 
 """
 python kfold_predict_hip_crop_keypoints.py \
-  --model_name convnext_small_fpn1234concat \
-  --kp_left_tpl "weights/convnext_small_fpn1234concat_simcc_cropleft_mirror_224_200_0.0001_32_fold{fold}_best.pth" \
+  --model_name convnext_small_custom \
+  --kp_left_tpl "weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_fold{fold}_best.pth" \
   --yolo_weights weights/yolo12s_fold{fold}.pt \
   --data_root data \
   --k 5 \
