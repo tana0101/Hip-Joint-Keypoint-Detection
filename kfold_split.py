@@ -172,8 +172,9 @@ if __name__ == "__main__":
     
 '''
 python kfold_split.py \
-  --src dataset/xray_IHDI_5 \
+  --src dataset/xray_IHDI_6 \
   --dst data \
   --k 5 \
   --seed 42 \
+  --overwrite
 '''

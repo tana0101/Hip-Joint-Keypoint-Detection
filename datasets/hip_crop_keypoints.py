@@ -2,12 +2,15 @@ import os
 import json
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
 
 from PIL import Image
+from tqdm import tqdm
 
 SIDE_LABELS = {"left": "LeftHip", "right": "RightHip"}
 SIDE_INDEX = {"left": (0, 6), "right": (6, 12)}  # 12 點中的 slice
@@ -49,6 +52,82 @@ def parse_12pt_csv_to_np(annotation_csv_path):
     pts = np.array(pts, dtype=np.float32)  # (12,2)
     assert pts.shape == (12, 2), f"Expect 12 points, got {pts.shape}"
     return pts
+
+def display_image(dataset, index, save_path=None):
+    # Get the nth image and keypoints
+    image, keypoints, original_size = dataset[index]
+    print(f"Displaying image {index}")
+    print("Original size:", original_size)
+    print("Image shape:", image.shape)
+    
+    # Convert the image to a NumPy array
+    image_np = image.permute(1, 2, 0).numpy()
+
+    # Display the image
+    plt.imshow(image_np, cmap='gray')
+    plt.title(f"Image {index} with Keypoints")
+    
+    # Plot the keypoints with numbering
+    for i in range(0, len(keypoints), 2):
+        x = keypoints[i].item()  
+        y = keypoints[i + 1].item()  
+        plt.scatter(x, y, c='red', s=20)
+        plt.text(x, y, f'{i//2 + 1}', color='yellow', fontsize=12)  # Add number next to each point
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Saved image with keypoints to {save_path}")
+    
+    plt.show()
+    plt.close()
+
+def save_all_visualizations(dataset, output_dir="output_debug_crops", tick_spacing=10):
+    """
+    tick_spacing: 設定每隔多少 pixel 畫一條線 (數值越小越密集)
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    print(f"Start processing {len(dataset)} images...")
+
+    for i in tqdm(range(len(dataset))):
+        image_tensor, keypoints, original_crop_size, img_name = dataset[i]
+        
+        # 轉 numpy
+        image_np = image_tensor.permute(1, 2, 0).numpy()
+        
+        # 建立畫布
+        fig, ax = plt.subplots(figsize=(6, 6)) # 稍微大一點比較好看清楚
+        ax.imshow(image_np, cmap='gray')
+        
+        title_str = f"{img_name}\nOrg: {int(original_crop_size[0])}x{int(original_crop_size[1])}"
+        ax.set_title(title_str, fontsize=10)
+
+        ax.xaxis.set_major_locator(MultipleLocator(tick_spacing))
+        ax.yaxis.set_major_locator(MultipleLocator(tick_spacing))
+        
+        ax.grid(True, which='both', color='cyan', linestyle='--', linewidth=0.5, alpha=0.8)
+
+        # 移除刻度標籤
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        ax.tick_params(axis='both', which='both', length=0)
+        
+        # ---------------------------------------------------------
+        # 畫關鍵點
+        kps = keypoints.numpy()
+        for k in range(0, len(kps), 2):
+            x = kps[k]
+            y = kps[k+1]
+            ax.scatter(x, y, c='red', s=40, marker='.', zorder=5) # zorder=5 確保點在網格之上
+            ax.text(x + 2, y + 2, f'{k//2 + 1}', color='yellow', fontsize=12, weight='bold', zorder=5)
+
+        # 存檔
+        save_path = os.path.join(output_dir, img_name)
+        plt.savefig(save_path, bbox_inches='tight', dpi=100) # dpi 可以調高讓文字更清晰
+        plt.close(fig)
+
+    print(f"\nDone! All images saved to: {output_dir}")
 
 # Custom dataset class
 class HipCropKeypointDataset(Dataset):
@@ -150,7 +229,7 @@ class HipCropKeypointDataset(Dataset):
         keypoints = torch.tensor(pts6_resized.reshape(-1), dtype=torch.float32)  # (12,)
         
         crop_size = (x2 - x1, y2 - y1)
-        return img_out, keypoints, crop_size
+        return img_out, keypoints, crop_size, img_name
     
 class MirroredToSideDataset(Dataset):
     """
@@ -170,7 +249,7 @@ class MirroredToSideDataset(Dataset):
         return len(self.ds)
 
     def __getitem__(self, idx):
-        image, keypoints, crop_size = self.ds[idx]  # image: Tensor [3,224,224]；keypoints: Tensor 長度=12(6點xy)
+        image, keypoints, crop_size, img_name = self.ds[idx]  # image: Tensor [3,224,224]；keypoints: Tensor 長度=12(6點xy)
         # 1) 水平鏡像影像
         image_flipped = TF.hflip(image)
         # 2) x 座標鏡像（在 224×224）
@@ -182,4 +261,22 @@ class MirroredToSideDataset(Dataset):
         k_xy = k.view(-1, 2)                      # (6,2)
         k_xy = k_xy[REORDER_6, :]                 # 重排
         k_out = k_xy.reshape(-1)                  # 還原為 (12,)
-        return image_flipped, k_out, crop_size
+        return image_flipped, k_out, crop_size, img_name
+    
+if __name__ == "__main__":
+    from transforms import get_hip_base_transform
+
+    transform = get_hip_base_transform(input_size=224)
+
+    dataset = HipCropKeypointDataset(
+        img_dir="../dataset/xray_IHDI_6/images",
+        annotation_dir="../dataset/xray_IHDI_6/annotations",
+        detections_dir="../dataset/xray_IHDI_6/detections",
+        side="left",
+        transform=transform,
+        crop_expand=0.10,
+        keep_square=True,
+        input_size=224
+    )
+
+    save_all_visualizations(dataset, output_dir="check_left_hip_crops")

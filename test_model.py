@@ -5,5 +5,5 @@ from torchinfo import summary
 from models.model import initialize_model
 
 if __name__ == "__main__":
-    model = initialize_model("convnext_small_mg1234", num_points=6, head_type="simcc_2d", input_size=(224, 224), Nx=448, Ny=448)
+    model = initialize_model("efficientnet", num_points=6, head_type="simcc_2d_deconv", input_size=(224, 224), Nx=448, Ny=448)
     summary(model, input_size=(1, 3, 224, 224))
