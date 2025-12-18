@@ -9,3 +9,8 @@ logs/
 data/
 dataset/
 runs/
+results
+results_kfold
+results_kfold_2
+results_kfold_3
+check_left_hip_crops/

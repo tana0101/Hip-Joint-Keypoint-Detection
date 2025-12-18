@@ -194,4 +194,4 @@ if __name__ == "__main__":
         seed=args.seed,
     )
 
-# python split.py --dataset dataset/xray_IHDI_5 --out data --train 0.8 --val 0.1 --test 0.1 --seed 42
+# python split.py --dataset dataset/xray_IHDI_6 --out data --train 0.8 --val 0.1 --test 0.1 --seed 42

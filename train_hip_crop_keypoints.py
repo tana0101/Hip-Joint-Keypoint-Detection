@@ -179,7 +179,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         nme_list, pixel_error_list = [], []
 
         # Training Loop
-        for images, keypoints, crop_sizes in train_loader:
+        for images, keypoints, crop_sizes, img_names in train_loader:
             images, keypoints = images.to(device), keypoints.to(device)
             optimizer.zero_grad()
             outputs = model(images)  # (B, 12) for 6 points
@@ -235,7 +235,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         val_loss, val_nmes_list, val_pixel_error_list = 0.0, [], []
 
         with torch.no_grad():  # No need to track gradients during validation
-            for images, keypoints, crop_sizes in val_loader:
+            for images, keypoints, crop_sizes, img_names in val_loader:
                 images, keypoints = images.to(device), keypoints.to(device)
 
                 outputs = model(images)

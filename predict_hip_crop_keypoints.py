@@ -48,6 +48,10 @@ DISTANCE_BINS = [
     (15.0, np.inf,"15+"),
 ]
 
+# outlier thresholds
+PIX_TH = 10.0     # pixel distance threshold
+ANG_TH = 8.0      # degree threshold
+
 def build_distance_ranges(result_dir):
     """依據 DISTANCE_BINS 建立對應的資料夾 dict。"""
     distance_ranges = {}
@@ -189,6 +193,17 @@ def calculate_avg_distance(predicted_keypoints, original_keypoints):
     distances = np.linalg.norm(predicted_keypoints - original_keypoints, axis=1)
     avg_distance = np.mean(distances)
     return avg_distance
+
+def calc_point_dists(pred_kpts: np.ndarray, gt_kpts: np.ndarray) -> np.ndarray:
+    """
+    pred_kpts, gt_kpts: (12, 2)
+    return: per-point euclidean distance, shape (12,)
+    """
+    diff = pred_kpts.astype(np.float32) - gt_kpts.astype(np.float32)
+    return np.sqrt((diff ** 2).sum(axis=1))
+
+def fmt_float(x: float) -> str:
+    return f"{float(x):.2f}"
 
 def extract_info_from_model_path(model_path):
     """
@@ -571,6 +586,12 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     left_gts_all = [] # To store left ground truth keypoints
     right_preds_all = [] # To store right predicted keypoints
     right_gts_all = [] # To store right ground truth keypoints
+    
+    # outlier records
+    pixel_outlier_records = []
+    angle_outlier_records = []
+    all_outlier_records   = []
+    all_outlier_files = []
 
     image_dir = os.path.join(data_dir, 'images')
     image_files = sorted(f for f in os.listdir(image_dir) if f.lower().endswith((".jpg", ".jpeg", ".png")))
@@ -707,9 +728,46 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
                 image_file=image_file
             )
 
-            # Save predicted keypoints
-            # np.savetxt(os.path.join(subfolder, f"{os.path.splitext(image_file)[0]}_keypoints.txt"), scaled_keypoints, fmt="%.2f", delimiter=",")
+            # --- 輸出 outlier 記錄 --- 
+            # per-point distances
+            point_dists = calc_point_dists(scaled_keypoints, original_keypoints)  # (12,)
+            left_mean_dist = float(np.mean(point_dists[:6]))
+            right_mean_dist = float(np.mean(point_dists[6:]))
+            overall_mean_dist = float(np.mean(point_dists))
+            
+            # pixel outlier rule (recommended)
+            is_pixel_outlier = (left_mean_dist > PIX_TH) or (right_mean_dist > PIX_TH)
+            
+            # angle outlier rule
+            left_ang_err = float(abs(ai_left_pred - ai_left_gt))
+            right_ang_err = float(abs(ai_right_pred - ai_right_gt))
+            is_angle_outlier = (left_ang_err > ANG_TH) or (right_ang_err > ANG_TH)
+            
+            # compose reason text
+            if is_pixel_outlier:
+                reason = (
+                    f"{image_file} "
+                    f"left_mean {fmt_float(left_mean_dist)} right_mean {fmt_float(right_mean_dist)} "
+                    f"overall_mean {fmt_float(overall_mean_dist)}"
+                )
+                pixel_outlier_records.append(reason)
+                all_outlier_records.append("pixel " + reason)
+                
+            
+            if is_angle_outlier:
+                reason = (
+                    f"{image_file} "
+                    f"left_AI_err {fmt_float(left_ang_err)} right_AI_err {fmt_float(right_ang_err)} "
+                    f"left_AI_pred {fmt_float(ai_left_pred)} left_AI_gt {fmt_float(ai_left_gt)} "
+                    f"right_AI_pred {fmt_float(ai_right_pred)} right_AI_gt {fmt_float(ai_right_gt)}"
+                )
+                angle_outlier_records.append(reason)
+                all_outlier_records.append("angle " + reason)
 
+            if is_pixel_outlier or is_angle_outlier:
+                image_files_base = os.path.splitext(image_file)[0]
+                all_outlier_files.append(image_files_base)
+            
             image_counter += 1  # Increment the image index
 
     # -------------------------------------------------------------- Plotting the average distances and AI angle errors --------------------------------------------------------------
@@ -831,6 +889,27 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     r2_pixel = r2_score(all_avg_distances, ai_errors_avg)
     print(f"Pixel distance error vs AI angle error correlation: r = {r_pixel:.2f}, r² = {r2_pixel:.2f}")
 
+    # 儲存 outlier 結果
+    pixel_txt_path = os.path.join(result_dir, "outliers_pixel.txt")
+    angle_txt_path = os.path.join(result_dir, "outliers_angle.txt")
+    all_txt_path   = os.path.join(result_dir, "outliers_all.txt")
+    all_outlier_files_path = os.path.join(result_dir, "outlier_files.txt")
+
+    with open(pixel_txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(pixel_outlier_records))
+
+    with open(angle_txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(angle_outlier_records))
+
+    with open(all_txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(all_outlier_records))
+        
+    with open(all_outlier_files_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(all_outlier_files))
+        
+    print(f"Number of outliers: {len(all_outlier_files)}.")
+    
+    # 彙整所有指標
     metrics = {
         "exp_name": exp_name,
         "num_images": len(image_labels),

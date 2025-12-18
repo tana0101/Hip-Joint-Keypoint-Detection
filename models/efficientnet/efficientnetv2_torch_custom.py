@@ -438,23 +438,37 @@ class EfficientNet(nn.Module):
     """
     取代原 classifier：輸出展平成向量 z，再交給 HeadAdapter
     """
-    def __init__(self, num_points: int, head_type: str, 
+    def __init__(self, num_points,
+                 head_type="direct_regression",
                  input_size: tuple[int, int] = (224, 224),
-                 Nx: int = None, Ny: int = None):
+                 Nx=None, Ny=None):
         super().__init__()
         model = models.efficientnet_v2_m(pretrained=True)
-        in_features = model.classifier[1].in_features
-        # 讓 forward 輸出的是 avgpool 後的向量
-        model.classifier = nn.Identity()
-        self.model = model
-        self.norm = nn.LayerNorm(in_features)
-        self.kp_head = HeadAdapter(head_type, in_features=in_features,
-                                   num_points=num_points, Nx=Nx, Ny=Ny)
-
+        
+        self.backbone = model
+        
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, input_size[0], input_size[1])
+            feat = self._extract_features(dummy)   # [1, C_in, H, W]
+            _, C_in, H, W = feat.shape
+            
+        # HeadAdapter
+        self.head = HeadAdapter(
+            head_type=head_type,
+            in_channels=C_in,
+            map_size=(H, W),
+            num_points=num_points,
+            Nx=Nx,
+            Ny=Ny,
+        )
+    def _extract_features(self, x: torch.Tensor) -> torch.Tensor:
+        # EfficientNetV2 feature maps come from .features
+        return self.backbone.features(x)
+    
     def forward(self, x):
-        z = self.model(x)         # [B, in_features]
-        z = self.norm(z)
-        return self.kp_head(z)
+        z = self._extract_features(x)         # [B, C_in, H, W]
+        z = self.head(z)
+        return z
 
 class EfficientNet_FC2048(nn.Module):
     """

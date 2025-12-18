@@ -262,7 +262,7 @@ class FPN(nn.Module):
                 y = lateral
             else:
                 # 上一層 upsample 到現在這層大小
-                prev_upsampled = F.interpolate(prev, size=lateral.shape[-2:], mode="nearest")
+                prev_upsampled = F.interpolate(prev, size=lateral.shape[-2:], mode="bilinear", align_corners=False)
                 y = lateral + prev_upsampled
             y = self.output_convs[len(feats) - 1 - idx](y)
             results.append(y)
@@ -278,7 +278,7 @@ class FPN(nn.Module):
             # 先把全部 resize 成同一個空間，再 concat
             target_size = results[0].shape[-2:]
             resized = [
-                F.interpolate(f, size=target_size, mode="nearest")
+                F.interpolate(f, size=target_size, mode="bilinear", align_corners=False)
                 for f in results
             ]
             fused = torch.cat(resized, dim=1)  # [B, C*out_levels, H, W]

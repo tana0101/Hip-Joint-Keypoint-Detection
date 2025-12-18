@@ -22,7 +22,7 @@ class AugmentedKeypointDataset(Dataset):
 
     def __getitem__(self, idx):
         # Retrieve the original data
-        image, keypoints, crop_size = self.original_dataset[idx]
+        image, keypoints, crop_size, img_name = self.original_dataset[idx]
         crop_width, crop_height = crop_size
 
         # Generate random augmentation parameters
@@ -62,4 +62,4 @@ class AugmentedKeypointDataset(Dataset):
             rotated_image, angle=0, translate=(translate_x, translate_y), scale=1, shear=0
         )
 
-        return translated_image, torch.tensor(keypoints_translated, dtype=torch.float32), (crop_width, crop_height)
+        return translated_image, torch.tensor(keypoints_translated, dtype=torch.float32), (crop_width, crop_height), img_name
