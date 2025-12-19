@@ -50,6 +50,49 @@ class CrosshairLabel(QLabel):
 
         p.end()
 
+class ZoomImageDialog(QDialog):
+    def __init__(self, image_rgb, title="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+
+        self.base_image = image_rgb  # numpy, H x W x 3, RGB
+        self.h, self.w, self.c = self.base_image.shape
+        self.zoom = 1.0
+
+        self.label = QLabel(self)
+        self.update_image()
+
+    def update_image(self):
+        qimage = QImage(
+            self.base_image.data,
+            self.w,
+            self.h,
+            self.w * self.c,
+            QImage.Format_RGB888
+        )
+        pixmap = QPixmap.fromImage(qimage)
+
+        scaled_w = int(self.w * self.zoom)
+        scaled_h = int(self.h * self.zoom)
+        scaled_pixmap = pixmap.scaled(
+            scaled_w,
+            scaled_h,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        self.label.setPixmap(scaled_pixmap)
+        self.label.resize(scaled_w, scaled_h)
+        self.resize(scaled_w, scaled_h)
+
+    def wheelEvent(self, event):
+        angle = event.angleDelta().y()
+        factor = 1.1 if angle > 0 else 0.9
+        new_zoom = max(0.2, min(5.0, self.zoom * factor))
+        if abs(new_zoom - self.zoom) > 1e-3:
+            self.zoom = new_zoom
+            self.update_image()
+
 class KeypointAnnotationApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -138,6 +181,9 @@ class KeypointAnnotationApp(QWidget):
             # 縮放圖片至1/10
             new_h, new_w = int(h / 5), int(w / 5)
             image_resized = cv2.resize(image, (new_w, new_h))
+            
+            scale_x = new_w / w
+            scale_y = new_h / h
 
             # 獲取當前圖片名稱
             image_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -151,14 +197,25 @@ class KeypointAnnotationApp(QWidget):
                 matches = re.findall(r"\((\d+),\s*(\d+)\)", line)
                 keypoints = [(int(x), int(y)) for x, y in matches]
 
-                scale_x = new_w / w
-                scale_y = new_h / h
-
                 for idx, (x, y) in enumerate(keypoints, start=1):
                     x_scaled, y_scaled = int(x * scale_x), int(y * scale_y)
                     cv2.circle(image_resized, (x_scaled, y_scaled), 1, (255, 0, 0), -1)
-                    cv2.putText(image_resized, str(idx), (x_scaled + 5, y_scaled - 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+                    # 1–6：右上角；7–12：左上角
+                    if idx <= 6:
+                        text_pos = (x_scaled + 5, y_scaled - 5)   # 右上
+                    else:
+                        text_pos = (x_scaled - 15, y_scaled - 5)  # 左上（x 往左拉一點）
+
+                    cv2.putText(
+                        image_resized,
+                        str(idx),
+                        text_pos,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (255, 255, 255),
+                        1
+                    )
 
             # ----------------------
             # 畫 Hip 物件框
@@ -307,11 +364,14 @@ class KeypointAnnotationApp(QWidget):
 
         original_h, original_w, c = image.shape
 
-        # 縮放圖片至 800x600
-        display_w, display_h = 800, 600
+        # 縮放圖片至 50%
+        SCALE = 0.7
+        display_w = int(original_w * SCALE)
+        display_h = int(original_h * SCALE)
+
         image_resized = cv2.resize(image, (display_w, display_h))
 
-        # 計算縮放比例
+        # 計算縮放比例（顯示 / 原圖）
         scale_x = display_w / original_w
         scale_y = display_h / original_h
 
@@ -326,10 +386,16 @@ class KeypointAnnotationApp(QWidget):
             for idx, (x, y) in enumerate(self.keypoints, start=1):
                 x_scaled, y_scaled = int(x * scale_x), int(y * scale_y)
                 cv2.circle(image_resized, (x_scaled, y_scaled), 3, (255, 0, 0), -1)  # 紅色點
+
+                if idx <= 6:
+                    text_pos = (x_scaled + 5, y_scaled - 5)   # 右上
+                else:
+                    text_pos = (x_scaled - 15, y_scaled - 5)  # 左上
+
                 cv2.putText(
                     image_resized, 
                     str(idx), 
-                    (x_scaled + 5, y_scaled - 5),
+                    text_pos,
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     0.5, 
                     (0, 255, 0), 
@@ -374,18 +440,11 @@ class KeypointAnnotationApp(QWidget):
 
         # ------------------------
         # 在新視窗顯示圖片
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"標註 - {image_name}")
-        dialog.setGeometry(100, 100, display_w, display_h)
-
-        image_label = QLabel(dialog)
-        image_label.setGeometry(0, 0, display_w, display_h)
-
-        bytes_per_line = 3 * display_w
-        qimage = QImage(image_resized.data, display_w, display_h, bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(qimage)
-        image_label.setPixmap(pixmap)
-
+        dialog = ZoomImageDialog(
+            image_resized,
+            title=f"標註 - {image_name}",
+            parent=self
+        )
         dialog.exec_()
 
     def label_image(self):
@@ -478,38 +537,88 @@ class LabelWindow(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("標註圖片")
-        self.setGeometry(100, 100, 800, 600)
-        
-        # 顯示圖片，縮放圖片至 800x600
+
+        # 讀原圖
         self.image = cv2.imread(self.image_path)
         self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
-        self.original_h, self.original_w, self.c = self.image.shape  # 原圖像的大小
-        self.image = cv2.resize(self.image, (800, 600))  # 縮放到 800x600
+        self.original_h, self.original_w, self.c = self.image.shape  # 原圖大小
+
+        # 這裡可以是原圖 / 2 或 / 3，看你之前怎麼設：
+        SCALE = 0.7
+        disp_w = int(self.original_w * SCALE)
+        disp_h = int(self.original_h * SCALE)
+
+        # 基礎顯示用影像（之後 zoom 只在這上面放大縮小）
+        self.image = cv2.resize(self.image, (disp_w, disp_h))
         self.h, self.w, self.c = self.image.shape
         self.image_copy = self.image.copy()
 
-        # 設置畫布
+        # ⭐ 新增：目前的 zoom 倍率
+        self.zoom = 1.0
+
+        # 視窗 / 畫布大小 = 基礎顯示大小
+        self.setGeometry(100, 100, self.w, self.h)
         self.canvas = QLabel(self)
         self.canvas.setGeometry(0, 0, self.w, self.h)
         self.update_image()
 
-        # 顯示圖片名稱
+        # 顯示 → 原圖 的縮放比例（跟 zoom 無關）
         self.scale_x = self.original_w / self.w
         self.scale_y = self.original_h / self.h
 
     def update_image(self):
-        qimage = QImage(self.image_copy.data, self.w, self.h, self.w * self.c, QImage.Format_RGB888)
+        # 先把 numpy 影像轉成 QImage / QPixmap（基礎尺寸 self.w x self.h）
+        qimage = QImage(
+            self.image_copy.data,
+            self.w,
+            self.h,
+            self.w * self.c,
+            QImage.Format_RGB888
+        )
         pixmap = QPixmap.fromImage(qimage)
-        self.canvas.setPixmap(pixmap)
 
+        # 再依照 zoom 放大 / 縮小
+        scaled_w = int(self.w * self.zoom)
+        scaled_h = int(self.h * self.zoom)
+        scaled_pixmap = pixmap.scaled(
+            scaled_w,
+            scaled_h,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        self.canvas.setPixmap(scaled_pixmap)
+        self.canvas.resize(scaled_w, scaled_h)
+        self.resize(scaled_w, scaled_h)
+
+    def wheelEvent(self, event):
+        angle = event.angleDelta().y()
+        if angle > 0:
+            factor = 1.1   # 滾輪往上：放大
+        else:
+            factor = 0.9   # 滾輪往下：縮小
+
+        new_zoom = self.zoom * factor
+        # 限制範圍，例如 0.2x ~ 5x
+        new_zoom = max(0.2, min(5.0, new_zoom))
+
+        if abs(new_zoom - self.zoom) > 1e-3:
+            self.zoom = new_zoom
+            self.update_image()
+    
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             # 左鍵點擊，添加標註點
             x, y = event.x(), event.y()
-            if 0 <= x < self.w and 0 <= y < self.h:
+            
+            # 轉回「基礎顯示圖」座標
+            x_disp = x / self.zoom
+            y_disp = y / self.zoom
+            
+            if 0 <= x_disp < self.w and 0 <= y_disp < self.h:
                 # 反向縮放回原圖大小
-                original_x = int(x * self.scale_x)
-                original_y = int(y * self.scale_y)
+                original_x = int(x_disp * self.scale_x)
+                original_y = int(y_disp * self.scale_y)
                 self.keypoints.append((original_x, original_y))
                 # 在縮放後的圖片上顯示標註點及其順序
                 self.image_copy = self.image.copy()
@@ -517,11 +626,18 @@ class LabelWindow(QWidget):
                     # 縮放點回顯示大小
                     px_scaled = int(px / self.scale_x)
                     py_scaled = int(py / self.scale_y)
-                    cv2.circle(self.image_copy, (px_scaled, py_scaled), 3, (255, 0, 0), -1)  # 紅色標註點
+                    cv2.circle(self.image_copy, (px_scaled, py_scaled), 2, (255, 0, 0), -1)  # 紅色標註點
+
+                    # 1–6：右上；7–12：左上
+                    if idx <= 6:
+                        text_pos = (px_scaled + 5, py_scaled - 5)
+                    else:
+                        text_pos = (px_scaled - 15, py_scaled - 5)
+
                     cv2.putText(
                         self.image_copy,
                         str(idx),
-                        (px_scaled + 5, py_scaled - 5),  # 在點的右上方顯示序號
+                        text_pos,
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
                         (0, 255, 0),  # 綠色文字
@@ -536,25 +652,43 @@ class LabelWindow(QWidget):
                 self.keypoints.pop()
                 self.image_copy = self.image.copy()
                 for idx, (px, py) in enumerate(self.keypoints, start=1):
-                    # 縮放點回顯示大小
                     px_scaled = int(px / self.scale_x)
                     py_scaled = int(py / self.scale_y)
-                    cv2.circle(self.image_copy, (px_scaled, py_scaled), 3, (255, 0, 0), -1)  # 紅色標註點
+                    
+                    # 顯示時要乘回 zoom
+                    px_show = int(px_scaled * self.zoom)
+                    py_show = int(py_scaled * self.zoom)
+
+                    cv2.circle(self.image_copy, (px_scaled, py_scaled), 2, (255, 0, 0), -1)
+                
+                    if idx <= 6:
+                        text_pos = (px_scaled + 5, py_scaled - 5)
+                    else:
+                        text_pos = (px_scaled - 15, py_scaled - 5)
+                
                     cv2.putText(
                         self.image_copy,
                         str(idx),
-                        (px_scaled + 5, py_scaled - 5),  # 在點的右上方顯示序號
+                        text_pos,
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
-                        (0, 255, 0),  # 綠色文字
+                        (0, 255, 0),
                         1,
                         cv2.LINE_AA
                     )
                 self.update_image()
 
     def closeEvent(self, event):
-        self.save_callback(self.keypoints)  # 儲存標註結果
-        event.accept()
+        if len(self.keypoints) != 12:
+            QMessageBox.warning(
+                self,
+                "錯誤",
+                f"目前只標註了 {len(self.keypoints)} 個點，必須標註 12 個點才能關閉！"
+            )
+            event.ignore()   # 不允許關閉
+        else:
+            self.save_callback(self.keypoints)
+            event.accept()
 
 class ObjectDetectionWindow(QWidget):
     def __init__(self, image_path, save_object_callback):
