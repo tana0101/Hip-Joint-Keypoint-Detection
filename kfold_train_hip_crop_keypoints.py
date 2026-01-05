@@ -419,7 +419,7 @@ python kfold_train_hip_crop_keypoints.py \
   --input_size 384 \
   --epochs 200 \
   --learning_rate 0.0001 \
-  --batch_size 32 \
+  --batch_size 16 \
   --side left \
   --mirror \
   --head_type simcc_2d \

@@ -9,26 +9,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import Tensor
 from timm.models.layers import trunc_normal_, DropPath
-from timm.models.registry import register_model
 from models.attention.SE import SEBlock
-
-class SE(nn.Module):
-    def __init__(self, dim, r=4):
-        super().__init__()
-        hidden = max(dim // r, 8)
-        self.fc1 = nn.Linear(dim, hidden)
-        self.act = nn.GELU()
-        self.fc2 = nn.Linear(hidden, dim)
-
-    def forward(self, x):  # x: (N,H,W,C)
-        s = x.mean(dim=(1, 2))              # GAP -> (N,C)
-        s = self.fc1(s)
-        s = self.act(s)
-        s = self.fc2(s)
-        s = s.unsqueeze(1).unsqueeze(1)     # (N,1,1,C)
-        return x * torch.sigmoid(s)
 
 class BlockD(nn.Module):
     def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6):
@@ -41,7 +23,7 @@ class BlockD(nn.Module):
         self.gamma = nn.Parameter(layer_scale_init_value * torch.ones((dim)), 
                                     requires_grad=True) if layer_scale_init_value > 0 else None
         # self.ffn_drop = nn.Dropout(p=0.1) # Feed-Forward Network Dropout
-        self.se = SE(4 * dim)
+        self.se = SEBlock(4 * dim)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity() 
         
         
@@ -237,16 +219,16 @@ class FPN(nn.Module):
                     # 1. 降維
                     nn.Conv2d(in_c, out_channels, kernel_size=1, bias=False),
                     
-                    # 2. 使用 ConvNeXt 的 LayerNorm
-                    # 關鍵：必須指定 data_format="channels_first" 才能處理 (N, C, H, W)
-                    LayerNorm(out_channels, eps=1e-6, data_format="channels_first"),
+                    # # 2. 使用 ConvNeXt 的 LayerNorm
+                    # # 關鍵：必須指定 data_format="channels_first" 才能處理 (N, C, H, W)
+                    # LayerNorm(out_channels, eps=1e-6, data_format="channels_first"),
                     
-                    # 3. 激活函數
-                    nn.GELU(),
+                    # # 3. 激活函數
+                    # nn.GELU(),
                     
-                    # 4. SE Attention (特徵篩選)
-                    # 放在 LN 和 GELU 之後效果通常最好，因為特徵已經被正規化且非線性化
-                    SEBlock(out_channels, reduction=4) 
+                    # # 4. SE Attention (特徵篩選)
+                    # # 放在 LN 和 GELU 之後效果通常最好，因為特徵已經被正規化且非線性化
+                    # SEBlock(out_channels, reduction=4) 
                 )
             )
             # 可以再接一個 3x3 conv 平滑一下
