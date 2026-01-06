@@ -1,6 +1,61 @@
 import numpy as np
 
 # ============================================================
+# 資料集轉換區
+# ============================================================
+
+# 將 MTDDH 資料集轉換為 xray_IHDI 的 12 點格式
+def unify_keypoints_format(points):
+    """
+    將不同定義的關鍵點統一轉換為 xray_IHDI 的 12 點格式。
+    
+    Format definition (12 points):
+    Idx 0 (P1): Left Outer Acetabulum
+    Idx 2 (P3): Left Inner Acetabulum (Teardrop)
+    Idx 3 (P4): Left Femoral Head (Component 1)
+    Idx 5 (P6): Left Femoral Head (Component 2) -> Average of P4, P6 is H-point
+    Idx 6 (P7): Right Inner Acetabulum (Teardrop)
+    Idx 8 (P9): Right Outer Acetabulum
+    Idx 9 (P10): Right Femoral Head (Component 1)
+    Idx 11 (P12): Right Femoral Head (Component 2) -> Average of P10, P12 is H-point
+    """
+    points = np.array(points)
+    
+    # 如果已經是 12 點格式，直接回傳
+    if points.shape[0] == 12:
+        return points
+        
+    # 處理 mtddh 8 點格式
+    # mtddh 視覺標註對應 (依據你的圖片判斷):
+    # Left Box: 1(Outer), 2(Inner), 3(?), 4(Center) -> Index 0, 1, 2, 3
+    # Right Box: 5(Outer), 6(Inner), 7(?), 8(Center) -> Index 4, 5, 6, 7
+    elif points.shape[0] == 8:
+        new_pts = np.zeros((12, 2))
+        
+        # --- Left Hip ---
+        new_pts[0] = points[0]  # P1 (Outer) <- mtddh pt1
+        new_pts[2] = points[1]  # P3 (Inner) <- mtddh pt2
+        
+        # H-point 處理：將 mtddh pt4 (Index 3) 同時給 P4 和 P6
+        new_pts[3] = points[3]  # P4
+        new_pts[5] = points[3]  # P6 (Duplicate)
+        
+        # --- Right Hip ---
+        # 注意：hip_geometry 中 p7 是 Inner, p9 是 Outer
+        # mtddh 圖片中：Pt5 是 Outer, Pt6 是 Inner
+        new_pts[6] = points[5]  # P7 (Inner) <- mtddh pt6 (Index 5)
+        new_pts[8] = points[4]  # P9 (Outer) <- mtddh pt5 (Index 4)
+        
+        # H-point 處理：將 mtddh pt8 (Index 7) 同時給 P10 和 P12
+        new_pts[9] = points[7]  # P10
+        new_pts[11] = points[7] # P12 (Duplicate)
+        
+        return new_pts
+        
+    else:
+        raise ValueError(f"不支援的關鍵點數量: {points.shape[0]}")
+
+# ============================================================
 # 幾何計算區
 # ============================================================
 

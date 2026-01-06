@@ -7,7 +7,8 @@ events.out.tfevents.*
 kfold_tmp/
 logs/
 data/
-dataset/
+mtddh_xray_2d/
+xray_IHDI_6/
 runs/
 results
 results_kfold
