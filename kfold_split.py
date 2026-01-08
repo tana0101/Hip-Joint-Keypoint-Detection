@@ -151,20 +151,20 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="K-fold split for xray_IHDI_5 dataset")
+    parser = argparse.ArgumentParser(description="K-fold split for object detection and keypoint datasets")
     parser.add_argument(
         "--src", type=str, required=True,
-        help="來源資料夾，包含 images/ annotations/ detections/ yolo_labels/"
+        help="Source directory containing images/, annotations/, detections/, yolo_labels/"
     )
     parser.add_argument(
         "--dst", type=str, required=True,
-        help="目標資料夾，會在底下產生 fold1..foldK 以及 data_fold{i}.yaml"
+        help="Destination directory where fold1..foldK and data_fold{i}.yaml will be created"
     )
-    parser.add_argument("--k", type=int, default=5, help="fold 數量")
-    parser.add_argument("--seed", type=int, default=42, help="亂數種子")
+    parser.add_argument("--k", type=int, default=5, help="Number of folds")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for shuffling")
     parser.add_argument(
         "--overwrite", action="store_true",
-        help="若目標資料夾已存在，先刪除再重建"
+        help="If the destination directory exists, delete it before creating new folds"
     )
 
     args = parser.parse_args()

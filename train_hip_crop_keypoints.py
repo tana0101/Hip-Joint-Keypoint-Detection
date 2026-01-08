@@ -386,7 +386,7 @@ if __name__ == "__main__":
     parser.add_argument("--side", type=str, default="left", choices=["left", "right"], help="Side to train on: 'left' or 'right'")
     parser.add_argument("--mirror", action="store_true", help="Whether to include mirrored data from the opposite side")
     parser.add_argument("--head_type", type=str, default="direct_regression", choices=["direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv"], help="Type of model head to use")
-    parser.add_argument("--split_ratio", type=float, default=2, help="Validation split ratio")
+    parser.add_argument("--split_ratio", type=float, default=2, help="SimCC split ratio for label encoding")
     parser.add_argument("--sigma", type=float, default=6.0, help="Sigma for SimCC label encoding")
     
     args = parser.parse_args()

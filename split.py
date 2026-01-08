@@ -177,12 +177,12 @@ def main(dataset: str, out: str = "data",
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Split dataset into train/val/test with multiple modalities and emit Ultralytics data.yaml")
-    parser.add_argument("--dataset", required=True, help="母目錄，例如 dataset/xray_IHDI_5")
-    parser.add_argument("--out", default="data", help="輸出根目錄（預設 data）")
-    parser.add_argument("--train", type=float, default=0.8, help="train 比例（預設 0.8）")
-    parser.add_argument("--val", type=float, default=0.1, help="val 比例（預設 0.1）")
-    parser.add_argument("--test", type=float, default=0.1, help="test 比例（預設 0.1）")
-    parser.add_argument("--seed", type=int, default=42, help="隨機種子（預設 42）")
+    parser.add_argument("--dataset", required=True, help="Root directory of the dataset, e.g., dataset/xray_IHDI_5")
+    parser.add_argument("--out", default="data", help="Output root directory (default: data)")
+    parser.add_argument("--train", type=float, default=0.8, help="Train split ratio (default: 0.8)")
+    parser.add_argument("--val", type=float, default=0.1, help="Validation split ratio (default: 0.1)")
+    parser.add_argument("--test", type=float, default=0.1, help="Test split ratio (default: 0.1)")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     args = parser.parse_args()
 
     main(
