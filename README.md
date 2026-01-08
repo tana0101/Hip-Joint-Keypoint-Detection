@@ -3,17 +3,18 @@
 <div align="center">
   <div>
     <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/README_zh_TW.md">🇹🇼繁體中文</a> |
-    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/README.md">🌏 English</a> |
-    <a href="https://deepwiki.com/tana0101/Hip-Joint-Keypoint-Detection">📚 DeepWiki</a> |
-    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/issues">❓ Issues</a><!-- |
-    📝 Paper (Not yet published)-->
+    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/README.md">🌏English</a> |
+    <a href="https://deepwiki.com/tana0101/Hip-Joint-Keypoint-Detection">📚DeepWiki</a> |
+    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/issues">❓issues</a><!-- |
+    📝Paper(尚未發表)-->
   </div>
 <br>
   <img src="src/img/project_banner.png" style="width: 70%;"/>
 <br>
     <a href="https://app.codacy.com/gh/tana0101/Hip-Joint-Keypoint-Detection/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade"><img src="https://app.codacy.com/project/badge/Grade/800c026fb9d1418e9cb735d1455c3383"/></a>
-    <img alt="Using Python version" src="https://img.shields.io/badge/python-3.10-blue.svg">
     <img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/tana0101/Hip-Joint-Keypoint-Detection">
+    <img alt="Using Python version" src="https://img.shields.io/badge/python-3.10-blue.svg">
+    <a href="https://deepwiki.com/tana0101/Hip-Joint-Keypoint-Detection"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
     <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=flat&logo=PyTorch&logoColor=white"/>
     <img alt="Ultralytics YOLO" src="https://img.shields.io/badge/Ultralytics%20YOLO-%23000000.svg?style=flat&logo=ultralytics&logoColor=white"/>
 </div>
@@ -143,14 +144,8 @@ The `Custom` suffix indicates modifications and optimizations based on official 
 
 - **🔄 Data Augmentation**: Random Rotation / Random Translation
 - **📉 Loss Functions**
-  - **Direct Regression**: MSE Loss
-    $$
-    L_{MSE} = \frac{1}{N} \sum_{i=1}^{N} \left( (x_i - \hat{x}_i)^2 + (y_i - \hat{y}_i)^2 \right)
-    $$
-  - **SimCC Series**: KL Divergence Loss
-    $$
-    L_{KL} = \frac{1}{N} \sum_{i=1}^{N} \left( D_{KL}(P_{x_i} || \hat{P}_{x_i}) + D_{KL}(P_{y_i} || \hat{P}_{y_i}) \right)
-    $$
+  - **Direct Regression (MSE Loss)**
+  - **SimCC Series (KL Divergence Loss)**
 - **⚙️ Optimizers**: AdamW
 - **📈 LR Schedulers**: Cosine Annealing + Warmup
 
