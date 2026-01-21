@@ -1,1 +1,0 @@
-修改訓練策略：從固定 lr 與 adam 優化器，修改成 warmup lr 、cosine decay 與 adamW 優化器。

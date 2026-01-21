@@ -11,10 +11,6 @@ from utils.hip_geometry import (
     unify_keypoints_format
 )
 
-# 設定中文字型
-plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial'] 
-plt.rcParams['axes.unicode_minus'] = False
-
 def load_annotations(annotation_path):
     keypoints = pd.read_csv(annotation_path, header=None).values.flatten()
     keypoints = [float(coord) for point in keypoints for coord in point.strip('"()').split(",")]

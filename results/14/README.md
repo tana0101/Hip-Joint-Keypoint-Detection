@@ -1,1 +1,0 @@
-使用 efficientnet 做特徵提取後接上 transformer 或 CMAM 進行關鍵點檢測的模型。

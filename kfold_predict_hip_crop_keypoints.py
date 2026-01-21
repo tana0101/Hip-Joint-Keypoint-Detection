@@ -6,7 +6,7 @@ import numpy as np
 from predict_hip_crop_keypoints import (
     predict,
     extract_info_from_model_path,
-    compute_and_save_confusion_matrices_with_accuracy,
+    compute_and_save_confusion_matrices_with_metrics,
     plot_ai_angle_scatter,
     plot_pixel_vs_angle_error,
 )
@@ -249,8 +249,7 @@ def main():
     )
 
     # ---- 5) Over-all confusion matrix（左/右/合併）----
-    # 函式需要 list[str]，這裡 already 是 list
-    cm_acc_left, cm_acc_right, cm_acc_all = compute_and_save_confusion_matrices_with_accuracy(
+    all_folds_cls_metrics = compute_and_save_confusion_matrices_with_metrics(
         left_preds=all_left_pred,
         left_gts=all_left_gt,
         right_preds=all_right_pred,
@@ -272,10 +271,13 @@ if __name__ == "__main__":
 
 """
 python kfold_predict_hip_crop_keypoints.py \
-  --model_name convnext_small_custom \
-  --kp_left_tpl "weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_384_200_0.0001_16_fold{fold}_best.pth" \
-  --yolo_weights weights/yolo12s_fold{fold}.pt \
+  --model_name convnext_small_fpn1234concat \
+  --kp_left_tpl "results_mtddh/results_kfold/convnext_small_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_16_fold{fold}_best.pth" \
+  --yolo_weights weights/yolo12s_kfold_mtddh_fold{fold}.pt \
   --data_root data \
   --k 5 \
-  --output_root results_kfold_3
+  --output_root results_kfold
 """
+# 
+# 
+# 

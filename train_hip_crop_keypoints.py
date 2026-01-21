@@ -23,21 +23,26 @@ from utils.simcc import (
 )
 from utils.regression import compute_loss_direct_regression
 from models.model import initialize_model
+from pathlib import Path
 
 LOGS_DIR = "logs"
 MODELS_DIR = "weights"
-POINTS_COUNT = 6  # 每側6個關鍵點
 
 def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror, head_type="direct_regression", split_ratio=2, sigma=6.0, fold_index=None):
     
-    points_count = POINTS_COUNT # 每側6個關鍵點
+    data_dir = Path(data_dir)
+
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+    if not data_dir.is_absolute():
+        data_dir = (PROJECT_ROOT / data_dir).resolve()
+    
     transform = get_hip_base_transform(input_size)
 
     # 單側資料集
     train_dataset = HipCropKeypointDataset(
-        img_dir=os.path.join(data_dir, 'train/images'),
-        annotation_dir=os.path.join(data_dir, 'train/annotations'),
-        detections_dir=os.path.join(data_dir, 'train/detections'),
+        img_dir = data_dir / 'train' / 'images',
+        annotation_dir = data_dir / 'train' / 'annotations',
+        detections_dir = data_dir / 'train' / 'detections',
         side=side,
         transform=transform,
         crop_expand=0.10,
@@ -45,15 +50,18 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         input_size=input_size
     )
     val_dataset = HipCropKeypointDataset(
-        img_dir=os.path.join(data_dir, 'val/images'),
-        annotation_dir=os.path.join(data_dir, 'val/annotations'),
-        detections_dir=os.path.join(data_dir, 'val/detections'),
+        img_dir = data_dir / 'val' / 'images',
+        annotation_dir = data_dir / 'val' / 'annotations',
+        detections_dir = data_dir / 'val' / 'detections',
         side=side,
         transform=transform,
         crop_expand=0.10,
         keep_square=True,
         input_size=input_size
     )
+    
+    points_count = train_dataset.num_keypoints
+    print(f"Auto-detected dataset points per side: {points_count}")
     
     # 使用鏡像資料擴增
     if mirror:
@@ -100,7 +108,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     else:
         Nx = None
         Ny = None
-    model = initialize_model(model_name, POINTS_COUNT, head_type=head_type, input_size=(input_size, input_size), Nx=Nx, Ny=Ny)
+    model = initialize_model(model_name, num_points=points_count, head_type=head_type, input_size=(input_size, input_size), Nx=Nx, Ny=Ny)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 

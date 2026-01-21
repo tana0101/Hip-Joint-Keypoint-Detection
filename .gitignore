@@ -7,11 +7,9 @@ events.out.tfevents.*
 kfold_tmp/
 logs/
 data/
+xray_IHDI*/
 mtddh_xray_2d/
-xray_IHDI_6/
 runs/
 results
-results_kfold
-results_kfold_2
-results_kfold_3
+results_kfold*/
 check_left_hip_crops/
