@@ -12,9 +12,36 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from tqdm import tqdm
 
+from .augment import AugmentedKeypointDataset
+
+DATASET_CONFIGS_BY_COUNT = {
+    12: {
+        "name": "IHDI_12pt",
+        # IHDI 的左右定義鏡像後需要交叉重排: [0,1,2] -> [2,1,0]
+        "mirror_reorder": [2, 1, 0, 5, 4, 3] 
+    },
+    8: {
+        "name": "MTDDH_8pt",
+        # MTDDH 假設是對稱定義 (1外/2內)，鏡像後通常順序不變，或根據實際情況調整
+        "mirror_reorder": [0, 1, 2, 3] 
+    }
+}
+
 SIDE_LABELS = {"left": "LeftHip", "right": "RightHip"}
-SIDE_INDEX = {"left": (0, 6), "right": (6, 12)}  # 12 點中的 slice
-REORDER_6 = [2, 1, 0, 5, 4, 3] # 鏡像翻轉後的點重排序
+
+def parse_csv_get_points(csv_path):
+    """
+    讀取 CSV 並回傳 numpy array，不預設點數，由資料決定
+    """
+    row = pd.read_csv(csv_path, header=None).values.flatten()
+    pts = []
+    for token in row:
+        token = str(token).strip().strip('"').strip("'").strip()
+        token = token.replace("(", "").replace(")", "")
+        if not token: continue # 跳過空值
+        x_str, y_str = token.split(",")
+        pts.append([float(x_str), float(y_str)])
+    return np.array(pts, dtype=np.float32)
 
 def read_detection_for_image(detections_dir: str, img_name: str):
     """
@@ -36,22 +63,6 @@ def read_detection_for_image(detections_dir: str, img_name: str):
         y1, y2 = (ya, yb) if ya <= yb else (yb, ya)
         dets[obj["label"]] = (float(x1), float(y1), float(x2), float(y2))
     return dets
-
-def parse_12pt_csv_to_np(annotation_csv_path):
-    """
-    讀 12 點 CSV（你原本的格式），回傳 shape=(12,2) 的 numpy。
-    支援每列像 "(x,y)" 或 "x,y"。若你的 CSV 不同，這裡再微調。
-    """
-    row = pd.read_csv(annotation_csv_path, header=None).values.flatten()
-    pts = []
-    for token in row:
-        token = str(token).strip().strip('"').strip("'").strip()
-        token = token.replace("(", "").replace(")", "")
-        x_str, y_str = token.split(",")
-        pts.append([float(x_str), float(y_str)])
-    pts = np.array(pts, dtype=np.float32)  # (12,2)
-    assert pts.shape == (12, 2), f"Expect 12 points, got {pts.shape}"
-    return pts
 
 def display_image(dataset, index, save_path=None):
     # Get the nth image and keypoints
@@ -148,23 +159,54 @@ class HipCropKeypointDataset(Dataset):
         self.detections_dir = detections_dir
         self.transform = transform
         self.side = side.lower()
-        assert self.side in ("left", "right")
-        self.side_label = SIDE_LABELS[self.side]
-        self.side_start, self.side_end = SIDE_INDEX[self.side]
         self.crop_expand = crop_expand
         self.keep_square = keep_square
         self.input_size = input_size
+        self.side_label = SIDE_LABELS[self.side]
 
-        self.images = sorted([f for f in os.listdir(img_dir) if f.endswith(".jpg")])
+        self.images = sorted([f for f in os.listdir(img_dir) if f.endswith((".jpg", ".png", ".jpeg"))])
         self.annotations = sorted([f for f in os.listdir(annotation_dir) if f.endswith(".csv")])
-
-        # 簡單對齊檔名（假設排序一致：同名 .jpg 對應同名 .csv）
-        # 若你的檔名不同步，建議用字典：image_name -> annotation_name
+        print(f"Found {len(self.images)} images and {len(self.annotations)} annotations.")
         assert len(self.images) == len(self.annotations), "Images/annotations count mismatch"
 
+        # ==========================================
+        # 自動偵測邏輯
+        # ==========================================
+        if len(self.annotations) > 0:
+            # 讀取第一個標註檔來偵測點數
+            sample_path = os.path.join(self.annotation_dir, self.annotations[0])
+            sample_pts = parse_csv_get_points(sample_path)
+            self.total_points = sample_pts.shape[0]
+            
+            # 檢查是否有對應的 Config
+            if self.total_points not in DATASET_CONFIGS_BY_COUNT:
+                raise ValueError(f"Detected {self.total_points} points, but no config found in DATASET_CONFIGS_BY_COUNT.")
+            
+            self.config = DATASET_CONFIGS_BY_COUNT[self.total_points]
+            print(f"[{side.upper()}] Detected Dataset: {self.config['name']} ({self.total_points} points total)")
+        else:
+            raise ValueError("Annotation directory is empty, cannot detect dataset format.")
+        
+        # ==========================================
+        # 自動計算切分 (Symmetry Logic)
+        # ==========================================
+        self.points_per_side = self.total_points // 2
+        
+        # 定義左右側的 Slice 範圍
+        # Left: 前半段 [0 : mid], Right: 後半段 [mid : total]
+        if self.side == "left":
+            self.slice_idx = (0, self.points_per_side)
+        else:
+            self.slice_idx = (self.points_per_side, self.total_points)
+        
     def __len__(self):
         return len(self.images)
 
+    # 讓外部程式 (如 train.py) 可以知道這份資料集單側有幾個點
+    @property
+    def num_keypoints(self):
+        return self.points_per_side
+    
     def __getitem__(self, idx):
         img_name = self.images[idx]
         img_path = os.path.join(self.img_dir, img_name)
@@ -175,8 +217,6 @@ class HipCropKeypointDataset(Dataset):
 
         # 1) 讀這張圖的 bbox（每張一檔）
         dets = read_detection_for_image(self.detections_dir, img_name)
-        if self.side_label not in dets:
-            raise KeyError(f"No detection for {img_name} / {self.side_label}")
         x1, y1, x2, y2 = dets[self.side_label]
 
         # 可能高度=0（兩點同 y），修成接近正方
@@ -194,24 +234,23 @@ class HipCropKeypointDataset(Dataset):
             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
             x1, x2 = cx - side_len / 2.0, cx + side_len / 2.0
             y1, y2 = cy - side_len / 2.0, cy + side_len / 2.0
-            bw = bh = side_len
 
         pad = self.crop_expand
-        x1 -= bw * pad;  x2 += bw * pad
-        y1 -= bh * pad;  y2 += bh * pad
+        x1 -= bw * pad; x2 += bw * pad; y1 -= bh * pad; y2 += bh * pad
+        x1, y1 = max(0, x1), max(0, y1); x2, y2 = min(W, x2), min(H, y2)
 
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(W, x2), min(H, y2)
-
-        # 2) 讀 12 點 → 取單側 6 點
-        pts12 = parse_12pt_csv_to_np(ann_path)      # (12,2)
-        pts6  = pts12[self.side_start:self.side_end]  # (6,2)
+        # 2) 讀取點並切分
+        pts_all = parse_csv_get_points(ann_path) # (Total, 2)
+        
+        # 利用自動計算的 slice_idx 取出該側的點
+        start, end = self.slice_idx
+        pts_crop = pts_all[start:end] # (Points_Per_Side, 2)
 
         # 映射到裁切座標（以裁切左上為原點）
         crop_w, crop_h = max(1.0, x2 - x1), max(1.0, y2 - y1)
-        pts6_crop = np.empty_like(pts6)
-        pts6_crop[:, 0] = pts6[:, 0] - x1
-        pts6_crop[:, 1] = pts6[:, 1] - y1
+        pts_local = np.empty_like(pts_crop)
+        pts_local[:, 0] = pts_crop[:, 0] - x1
+        pts_local[:, 1] = pts_crop[:, 1] - y1
 
         # 取得裁切圖
         img_crop = img.crop((int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))))
@@ -222,13 +261,13 @@ class HipCropKeypointDataset(Dataset):
         # 裁切→縮放比例（到 224×224）
         sx = self.input_size / crop_w
         sy = self.input_size / crop_h
-        pts6_resized = np.empty_like(pts6_crop)
-        pts6_resized[:, 0] = pts6_crop[:, 0] * sx
-        pts6_resized[:, 1] = pts6_crop[:, 1] * sy
+        pts_resized = np.empty_like(pts_local)
+        pts_resized[:, 0] = pts_local[:, 0] * sx
+        pts_resized[:, 1] = pts_local[:, 1] * sy
 
-        keypoints = torch.tensor(pts6_resized.reshape(-1), dtype=torch.float32)  # (12,)
-        
+        keypoints = torch.tensor(pts_resized.reshape(-1), dtype=torch.float32)
         crop_size = (x2 - x1, y2 - y1)
+        
         return img_out, keypoints, crop_size, img_name
     
 class MirroredToSideDataset(Dataset):
@@ -244,39 +283,54 @@ class MirroredToSideDataset(Dataset):
         assert target_side in ("left", "right")
         self.ds = source_dataset
         self.target_side = target_side
-
+        self.reorder_indices = self.ds.config.get("mirror_reorder", None) # 讀取關鍵點的重排規則
+        
     def __len__(self):
         return len(self.ds)
 
     def __getitem__(self, idx):
-        image, keypoints, crop_size, img_name = self.ds[idx]  # image: Tensor [3,224,224]；keypoints: Tensor 長度=12(6點xy)
-        # 1) 水平鏡像影像
-        image_flipped = TF.hflip(image)
-        # 2) x 座標鏡像（在 224×224）
+        image, keypoints, crop_size, img_name = self.ds[idx]
+        # 1) 鏡像影像
+        image_flipped = TF.hflip(image) 
         _, H, W = image.shape
         k = keypoints.clone()
         for i in range(0, len(k), 2):
-            k[i] = (W - 1) - k[i]  # 只改 x，y 不變
-        # 3) 索引重排（6點）：[0..5] -> [2,1,0,5,4,3]
-        k_xy = k.view(-1, 2)                      # (6,2)
-        k_xy = k_xy[REORDER_6, :]                 # 重排
-        k_out = k_xy.reshape(-1)                  # 還原為 (12,)
+            k[i] = (W - 1) - k[i]
+        
+        # 2) 重新排序關鍵點
+        if self.reorder_indices is not None:
+            k_xy = k.view(-1, 2)
+            # 確保 reorder 的長度與目前的點數一致 (防呆)
+            if len(self.reorder_indices) == k_xy.shape[0]:
+                k_xy = k_xy[self.reorder_indices, :]
+                k_out = k_xy.reshape(-1)
+            else:
+                # 如果配置檔的 reorder 數量跟實際點數不合，退回不重排並印警告
+                print(f"Warning: Mirror reorder size mismatch. Config: {len(self.reorder_indices)}, Data: {k_xy.shape[0]}")
+                k_out = k
+        else:
+            k_out = k
         return image_flipped, k_out, crop_size, img_name
     
 if __name__ == "__main__":
-    from transforms import get_hip_base_transform
+    from .transforms import get_hip_base_transform
 
     transform = get_hip_base_transform(input_size=224)
 
     dataset = HipCropKeypointDataset(
-        img_dir="../dataset/xray_IHDI_6/images",
-        annotation_dir="../dataset/xray_IHDI_6/annotations",
-        detections_dir="../dataset/xray_IHDI_6/detections",
-        side="left",
+        # img_dir="../dataset/xray_IHDI_6/images",
+        # annotation_dir="../dataset/xray_IHDI_6/annotations",
+        # detections_dir="../dataset/xray_IHDI_6/detections",
+        img_dir="../dataset/mtddh_xray_2d/images",
+        annotation_dir="../dataset/mtddh_xray_2d/annotations",
+        detections_dir="../dataset/mtddh_xray_2d/detections",
+        side="right",
         transform=transform,
         crop_expand=0.10,
         keep_square=True,
         input_size=224
     )
+    
+    augmented_dataset = AugmentedKeypointDataset(dataset, max_translate_x=20, max_translate_y=20)
 
-    save_all_visualizations(dataset, output_dir="check_left_hip_crops")
+    save_all_visualizations(augmented_dataset, output_dir="check_left_hip_crops")
