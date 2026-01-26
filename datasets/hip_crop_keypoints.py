@@ -12,7 +12,7 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from tqdm import tqdm
 
-from .augment import AugmentedKeypointDataset
+from .augment import AugmentedKeypointDataset, ProbAugmentedKeypointDataset
 
 DATASET_CONFIGS_BY_COUNT = {
     12: {
@@ -143,7 +143,8 @@ def save_all_visualizations(dataset, output_dir="output_debug_crops", tick_spaci
 # Custom dataset class
 class HipCropKeypointDataset(Dataset):
     def __init__(self, img_dir, annotation_dir, detections_dir, side="left",
-                 transform=None, crop_expand=0.10, keep_square=True, input_size=224):
+                 transform=None, crop_expand=0.10, keep_square=True, input_size=224,
+                 bbox_jitter=False, jitter_center=0.05, jitter_scale=0.10, jitter_prob=1.0):
         """
         Args:
             img_dir:      train/images
@@ -163,6 +164,10 @@ class HipCropKeypointDataset(Dataset):
         self.keep_square = keep_square
         self.input_size = input_size
         self.side_label = SIDE_LABELS[self.side]
+        self.bbox_jitter = bbox_jitter
+        self.jitter_center = jitter_center
+        self.jitter_scale = jitter_scale
+        self.jitter_prob = jitter_prob
 
         self.images = sorted([f for f in os.listdir(img_dir) if f.endswith((".jpg", ".png", ".jpeg"))])
         self.annotations = sorted([f for f in os.listdir(annotation_dir) if f.endswith(".csv")])
@@ -227,17 +232,58 @@ class HipCropKeypointDataset(Dataset):
             if y2 - y1 < width:  # 超界了往上撐
                 y1 = max(0.0, y2 - width)
 
-        # keep_square + 外擴
+        # ---- bbox jitter: train only ----
+        if self.bbox_jitter and np.random.rand() < self.jitter_prob:
+            bw = max(2.0, x2 - x1)
+            bh = max(2.0, y2 - y1)
+
+            cx = (x1 + x2) / 2.0
+            cy = (y1 + y2) / 2.0
+
+            # center jitter (relative to bbox size)
+            dx = np.random.uniform(-self.jitter_center, self.jitter_center) * bw
+            dy = np.random.uniform(-self.jitter_center, self.jitter_center) * bh
+
+            # size jitter
+            sw = np.random.uniform(1 - self.jitter_scale, 1 + self.jitter_scale)
+            sh = np.random.uniform(1 - self.jitter_scale, 1 + self.jitter_scale)
+
+            bw2 = bw * sw
+            bh2 = bh * sh
+
+            cx2 = cx + dx
+            cy2 = cy + dy
+
+            x1 = cx2 - bw2 / 2.0
+            x2 = cx2 + bw2 / 2.0
+            y1 = cy2 - bh2 / 2.0
+            y2 = cy2 + bh2 / 2.0
+
+            # clamp to image bounds early
+            x1 = max(0.0, x1); y1 = max(0.0, y1)
+            x2 = min(float(W), x2); y2 = min(float(H), y2)
+        
+         # ---- keep_square ----
         bw, bh = (x2 - x1), (y2 - y1)
         if self.keep_square:
+            bw = max(2.0, x2 - x1)
+            bh = max(2.0, y2 - y1)
             side_len = max(bw, bh)
+
             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
             x1, x2 = cx - side_len / 2.0, cx + side_len / 2.0
             y1, y2 = cy - side_len / 2.0, cy + side_len / 2.0
 
+        # ---- crop_expand (use CURRENT bbox size) ----
+        bw = max(2.0, x2 - x1)
+        bh = max(2.0, y2 - y1)
+
         pad = self.crop_expand
-        x1 -= bw * pad; x2 += bw * pad; y1 -= bh * pad; y2 += bh * pad
-        x1, y1 = max(0, x1), max(0, y1); x2, y2 = min(W, x2), min(H, y2)
+        x1 -= bw * pad; x2 += bw * pad
+        y1 -= bh * pad; y2 += bh * pad
+
+        x1 = max(0.0, x1); y1 = max(0.0, y1)
+        x2 = min(float(W), x2); y2 = min(float(H), y2)
 
         # 2) 讀取點並切分
         pts_all = parse_csv_get_points(ann_path) # (Total, 2)
@@ -321,16 +367,17 @@ if __name__ == "__main__":
         # img_dir="../dataset/xray_IHDI_6/images",
         # annotation_dir="../dataset/xray_IHDI_6/annotations",
         # detections_dir="../dataset/xray_IHDI_6/detections",
-        img_dir="../dataset/mtddh_xray_2d/images",
-        annotation_dir="../dataset/mtddh_xray_2d/annotations",
-        detections_dir="../dataset/mtddh_xray_2d/detections",
+        img_dir="dataset/mtddh_xray_2d/images",
+        annotation_dir="dataset/mtddh_xray_2d/annotations",
+        detections_dir="dataset/mtddh_xray_2d/detections",
         side="right",
         transform=transform,
-        crop_expand=0.10,
+        crop_expand=0.0,
         keep_square=True,
-        input_size=224
+        input_size=224,
+        bbox_jitter=True, jitter_center=0.05, jitter_scale=0.10, jitter_prob=0.7
     )
     
-    augmented_dataset = AugmentedKeypointDataset(dataset, max_translate_x=20, max_translate_y=20)
+    augmented_dataset = ProbAugmentedKeypointDataset(dataset, p=0.7, max_translate_x=10, max_translate_y=10, max_angle=5, clamp=True)
 
     save_all_visualizations(augmented_dataset, output_dir="check_left_hip_crops")

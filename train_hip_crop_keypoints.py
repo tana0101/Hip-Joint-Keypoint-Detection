@@ -3,15 +3,19 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
+# from optim.muon import MuSGD
+
 from torch.utils.data import DataLoader, ConcatDataset
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import random
+import copy
 
 from datasets.transforms import get_hip_base_transform
 from datasets.hip_crop_keypoints import HipCropKeypointDataset, MirroredToSideDataset
-from datasets.augment import AugmentedKeypointDataset
+from datasets.augment import ProbAugmentedKeypointDataset
 from utils.keypoint_metrics import calculate_nme, calculate_pixel_error
 from utils.keypoints import get_preds_and_targets
 from utils.experiment import build_experiment_name
@@ -22,11 +26,52 @@ from utils.simcc import (
     simcc_loss_fn,
 )
 from utils.regression import compute_loss_direct_regression
+from utils.ema import ModelEMA
 from models.model import initialize_model
 from pathlib import Path
 
 LOGS_DIR = "logs"
 MODELS_DIR = "weights"
+BBOX_EXPAND = 0.05
+BBOX_JITTER_PROB = 0.7
+BBOX_JITTER_CENTER = 0.05
+BBOX_JITTER_SCALE = 0.10
+EMA_DECAY = 0.995
+EMA_RAMPUP_STEPS = 500
+EMA_START_DECAY = 0.90
+
+# For reproducibility in DataLoader workers
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+def get_muon_param_groups(model, lr, weight_decay):
+    # 篩選參數：大於等於 2 維的用 Muon，小於 2 維的 (如 bias) 用純 SGD
+    muon_params = []
+    sgd_params = []
+    
+    for name, p in model.named_parameters():
+        if p.requires_grad:
+            if p.ndim >= 2:  # Conv filters, Linear weights
+                muon_params.append(p)
+            else:            # Biases, LayerNorms, 1D vectors
+                sgd_params.append(p)
+                
+    return [
+        {
+            "params": muon_params, 
+            "use_muon": True,   # 開啟 Muon 混合更新
+            "lr": lr, 
+            "weight_decay": weight_decay
+        },
+        {
+            "params": sgd_params, 
+            "use_muon": False,  # 關閉 Muon，只使用 SGD
+            "lr": lr, 
+            "weight_decay": weight_decay
+        }
+    ]
 
 def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror, head_type="direct_regression", split_ratio=2, sigma=6.0, fold_index=None):
     
@@ -45,9 +90,10 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         detections_dir = data_dir / 'train' / 'detections',
         side=side,
         transform=transform,
-        crop_expand=0.10,
+        crop_expand=BBOX_EXPAND,
         keep_square=True,
-        input_size=input_size
+        input_size=input_size,
+        bbox_jitter=True, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
     )
     val_dataset = HipCropKeypointDataset(
         img_dir = data_dir / 'val' / 'images',
@@ -55,9 +101,10 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         detections_dir = data_dir / 'val' / 'detections',
         side=side,
         transform=transform,
-        crop_expand=0.10,
+        crop_expand=BBOX_EXPAND,
         keep_square=True,
-        input_size=input_size
+        input_size=input_size,
+        bbox_jitter=False
     )
     
     points_count = train_dataset.num_keypoints
@@ -68,24 +115,37 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         opposite_side = "right" if side == "left" else "left"
         print(f"Preparing mirrored data from {opposite_side} side...")
         opposite_train_dataset = HipCropKeypointDataset(
-            img_dir=os.path.join(data_dir, 'train/images'),
-            annotation_dir=os.path.join(data_dir, 'train/annotations'),
-            detections_dir=os.path.join(data_dir, 'train/detections'),
+            img_dir=data_dir / 'train' / 'images',
+            annotation_dir=data_dir / 'train' / 'annotations',
+            detections_dir=data_dir / 'train' / 'detections',
             side=opposite_side,
             transform=transform,
-            crop_expand=0.10,
+            crop_expand=BBOX_EXPAND,
             keep_square=True,
-            input_size=input_size
+            input_size=input_size,
+            bbox_jitter=True, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
         )
+        opposite_val_dataset = HipCropKeypointDataset(
+            img_dir=data_dir / 'val' / 'images',
+            annotation_dir=data_dir / 'val' / 'annotations',
+            detections_dir=data_dir / 'val' / 'detections',
+            side=opposite_side,
+            transform=transform,
+            crop_expand=BBOX_EXPAND,
+            keep_square=True,
+            input_size=input_size,
+            bbox_jitter=False
+        )
+        # 建立鏡像資料集
         mirrored_dataset = MirroredToSideDataset(opposite_train_dataset, target_side=side)
+        mirrored_val_dataset = MirroredToSideDataset(opposite_val_dataset, target_side=side)
         # 合併原本的單側資料集與鏡像資料集
         train_dataset = ConcatDataset([train_dataset, mirrored_dataset])
+        val_dataset = ConcatDataset([val_dataset, mirrored_val_dataset])
         print(f"using mirrored data from {opposite_side} side, total training samples: {len(train_dataset)}")
         
-    # 資料增強：可以直接沿用你原本的 AugmentedKeypointDataset
-    augmented_dataset = AugmentedKeypointDataset(train_dataset, max_translate_x=20, max_translate_y=20)
-    augmented_dataset2 = AugmentedKeypointDataset(train_dataset, max_angle=10)
-    combined_dataset = ConcatDataset([train_dataset, augmented_dataset, augmented_dataset2])
+    # 資料增強
+    augmented_dataset = ProbAugmentedKeypointDataset(train_dataset, p=0.7, max_translate_x=10, max_translate_y=10, max_angle=5, clamp=True)
     
     # # To visualize the dataset
     # display_image(train_dataset, 0)
@@ -94,12 +154,15 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     #     display_image(augmented_dataset, i)
     #     display_image(augmented_dataset2, i)
     
-    train_loader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True,
-                                num_workers=12, pin_memory=True, prefetch_factor=4)
+    g = torch.Generator()
+    g.manual_seed(42)
+    
+    train_loader = DataLoader(augmented_dataset, batch_size=batch_size, shuffle=True,
+                                num_workers=24, pin_memory=True, prefetch_factor=8, worker_init_fn=seed_worker, generator=g)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                                num_workers=12, pin_memory=True, prefetch_factor=4)
+                                num_workers=24, pin_memory=True, prefetch_factor=8)
 
-    print(f"[{side.upper()}] Training samples: {len(combined_dataset)}, Validation samples: {len(val_dataset)}")
+    print(f"[{side.upper()}] Training samples: {len(augmented_dataset)}, Validation samples: {len(val_dataset)}")
     
     # Initialize the model, loss function, and optimizer
     if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
@@ -132,15 +195,25 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         raise ValueError(f"Unknown head_type: {head_type}")
     
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+    
+    # param_groups = get_muon_param_groups(model, lr=learning_rate, weight_decay=0.0005)
+    # optimizer = MuSGD(
+    #     param_groups, 
+    #     momentum=0.937,     # MuSGD
+    #     nesterov=True,
+    #     muon=0.9,         # Muon 更新權重比例 (預設 0.5)
+    #     sgd=0.1           # SGD 更新權重比例 (預設 0.5)
+    # )
+
     # Scheduler: Warm-up + Cosine
     total_steps = len(train_loader) * epochs
     warmup_steps = max(1, int(0.1 * total_steps))   # 前 10% steps 線性升溫
     base_lr = learning_rate
-    min_lr = 1e-6
+    min_lr = 1e-2 * base_lr
     
     def lr_lambda(step):
         if step < warmup_steps:
-            return step / float(warmup_steps)                     # 線性 warm-up: 0 -> 1
+            return (step + 1) / float(warmup_steps)
         # Cosine decay: 1 -> (min_lr/base_lr)
         t = (step - warmup_steps) / max(1, (total_steps - warmup_steps))
         cosine = 0.5 * (1 + math.cos(math.pi * t))               # 1 -> 0
@@ -148,11 +221,21 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     
+    # Initialize EMA
+    ema = ModelEMA(
+        model,
+        target_decay=EMA_DECAY,
+        device=device,
+        rampup_steps=EMA_RAMPUP_STEPS,
+        start_decay=EMA_START_DECAY,
+    )
+    
     # Save the model's training progress
     epoch_losses, epoch_nmes, epoch_pixel_errors = [], [], []
     val_losses, val_nmes, val_pixel_errors = [], [], []
     best_val_pixel_error, best_model_state = float('inf'), None
-
+    best_epoch_index = -1
+    
     # TensorBoard writer
     exp_name = build_experiment_name(
         model_name=model_name,
@@ -198,6 +281,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             scheduler.step()
+            ema.update(model)
             
             running_loss += loss.item()
 
@@ -239,14 +323,14 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         print(f"Epoch [{epoch+1}/{epochs}] Loss: {epoch_loss:.4f} | NME: {epoch_nme:.4f} | Pixel: {epoch_pixel_error:.4f}")
         
         # Validation Loop
-        model.eval()  # Set the model to evaluation mode
+        ema.ema.eval()  # Set the model to evaluation mode
         val_loss, val_nmes_list, val_pixel_error_list = 0.0, [], []
 
         with torch.no_grad():  # No need to track gradients during validation
             for images, keypoints, crop_sizes, img_names in val_loader:
                 images, keypoints = images.to(device), keypoints.to(device)
 
-                outputs = model(images)
+                outputs = ema.ema(images)  # Use EMA model for validation
 
                 # Calculate loss
                 loss = loss_fn(outputs, keypoints)
@@ -287,7 +371,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         # Save the model with the best validation loss
         if val_pixel_error < best_val_pixel_error:
             best_val_pixel_error = val_pixel_error
-            best_model_state = model.state_dict()  # Save the model state at the best point
+            best_model_state = copy.deepcopy(ema.ema.state_dict())
             best_epoch_index = epoch
             print(f"---------------- Validation pixel error improved to {best_val_pixel_error:.4f}, saving model. ----------------")
              
@@ -346,7 +430,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     plot_training_progress(
         epochs_range, epoch_losses, val_losses, epoch_nmes, val_nmes, epoch_pixel_errors, val_pixel_errors,
         loss_ylim=(0.01, 50),
-        nme_ylim=(0.0001, 0.02),
+        nme_ylim = (3e-3, 3e-2),
         pixel_error_ylim=(0.01, 50),
     )
 
