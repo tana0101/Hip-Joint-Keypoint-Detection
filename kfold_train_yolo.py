@@ -97,11 +97,11 @@ if __name__ == "__main__":
 
 '''
 python kfold_train_yolo.py \
-  --model yolo12s.pt \
+  --model yolo26s.pt \
   --data_tpl data/data_fold{fold}.yaml \
   --k 5 \
-  --epochs 300 --imgsz 640 --batch 8 --device 0 \
-  --project runs/train --name yolo12s_kfold --pretrained --seed 42 \
+  --epochs 100 --imgsz 640 --batch 32 --device 0 \
+  --project runs/train --name yolo26s_kfold --pretrained --seed 42 \
   --fliplr 0.0 --flipud 0.0 --degrees 5.0 \
   --shear 0.0 --perspective 0.0 --mosaic 0.0 --mixup 0.0
 '''

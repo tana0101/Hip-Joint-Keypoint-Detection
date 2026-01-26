@@ -37,7 +37,7 @@ YOLO_LEFT_CLS  = 0
 YOLO_RIGHT_CLS = 1
 YOLO_CONF      = 0.001
 YOLO_IOU       = 0.7
-BBOX_EXPAND    = 0.10
+BBOX_EXPAND    = 0.05
 
 DISTANCE_BINS = [
     (0.0, 2.5,   "0-2.5"),

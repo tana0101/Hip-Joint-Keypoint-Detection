@@ -20,9 +20,19 @@ def _square_expand_clip(x1, y1, x2, y2, W, H, expand=0.10, keep_square=True):
     return x1, y1, x2, y2
 
 def _detect_one(yolo_model, pil_img, cls_id, conf=0.05, iou=0.5):
-    """回傳單一 bbox (x1,y1,x2,y2)；若無偵測，回傳 None。"""
-    res = yolo_model.predict(source=pil_img, classes=[cls_id], conf=conf, iou=iou, max_det=1, verbose=False)
-    if not res or len(res[0].boxes) == 0:
+    res = yolo_model.predict(source=pil_img, conf=conf, iou=iou, max_det=20, verbose=False)
+    if not res or res[0].boxes is None or len(res[0].boxes) == 0:
         return None
-    xyxy = res[0].boxes.xyxy[0].cpu().numpy().tolist()  # [x1,y1,x2,y2]
+
+    boxes = res[0].boxes
+    cls = boxes.cls.detach().cpu().numpy().astype(int)
+    confs = boxes.conf.detach().cpu().numpy()
+
+    keep = (cls == int(cls_id))
+    if not keep.any():
+        return None
+
+    idxs = keep.nonzero()[0]
+    best = idxs[confs[idxs].argmax()]
+    xyxy = boxes.xyxy[best].cpu().numpy().tolist()
     return tuple(float(v) for v in xyxy)
