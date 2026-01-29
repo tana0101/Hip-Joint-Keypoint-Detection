@@ -5,6 +5,7 @@ from PIL import Image, ImageOps
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import json
 import re
 from sklearn.metrics import (
     confusion_matrix,
@@ -52,6 +53,44 @@ DISTANCE_BINS = [
 # outlier thresholds
 PIX_TH = 10.0     # pixel distance threshold
 ANG_TH = 8.0      # degree threshold
+
+# 如果需要以ground truth box為基準裁切，可以用這個函式從 det json 讀取
+def _load_box_from_det_json(det_path, label):
+    """
+    det json format:
+    {
+      "image": "...jpg",
+      "objects": [
+        {"label": "LeftHip",  "points": [[x1,y1],[x2,y2]]},
+        {"label": "RightHip", "points": [[x1,y1],[x2,y2]]}
+      ]
+    }
+
+    return: (x1, y1, x2, y2) as float, or None
+    """
+    if not os.path.exists(det_path):
+        return None
+
+    with open(det_path, "r", encoding="utf-8") as f:
+        d = json.load(f)
+
+    for obj in d.get("objects", []):
+        if obj.get("label") != label:
+            continue
+        pts = obj.get("points", None)
+        if not pts or len(pts) < 2:
+            return None
+        (x1, y1), (x2, y2) = pts[0], pts[1]
+
+        # 保險：確保是 left-top / right-bottom
+        xl = float(min(x1, x2))
+        yl = float(min(y1, y2))
+        xr = float(max(x1, x2))
+        yr = float(max(y1, y2))
+
+        return (xl, yl, xr, yr)
+
+    return None
 
 def build_distance_ranges(result_dir):
     """依據 DISTANCE_BINS 建立對應的資料夾 dict。"""
@@ -510,7 +549,7 @@ def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
     else:
         plt.show()
 
-def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir, fold_index=None):
+def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir, fold_index=None, using_gt_box=False):
     
     # 0. 自動判斷資料集格式
     ann_dir = os.path.join(data_dir, 'annotations')
@@ -595,12 +634,18 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     for idx, fname in enumerate(image_files, 1):
         img_path = os.path.join(data_dir, 'images', fname)
         ann_path = os.path.join(data_dir, 'annotations', os.path.splitext(fname)[0]+".csv")
+        det_path = os.path.join(data_dir, 'detections', os.path.splitext(fname)[0] + ".json")
         if not os.path.exists(ann_path): continue
 
         img = Image.open(img_path).convert("RGB")
         W, H = img.size
-        box_l = _detect_one(yolo_model, img, YOLO_LEFT_CLS, YOLO_CONF, YOLO_IOU)
-        box_r = _detect_one(yolo_model, img, YOLO_RIGHT_CLS, YOLO_CONF, YOLO_IOU)
+        if using_gt_box:
+            box_l = _load_box_from_det_json(det_path, "LeftHip")
+            box_r = _load_box_from_det_json(det_path, "RightHip")
+        else:
+            box_l = _detect_one(yolo_model, img, YOLO_LEFT_CLS, YOLO_CONF, YOLO_IOU)
+            box_r = _detect_one(yolo_model, img, YOLO_RIGHT_CLS, YOLO_CONF, YOLO_IOU)
+        
         if not box_l or not box_r:
             print(f"[Skip] {fname} detection failed."); continue
 
@@ -896,6 +941,7 @@ if __name__ == "__main__":
     parser.add_argument("--data", type=str, required=True, help="data directory")
     parser.add_argument("--output_dir", type=str, default="results", help="output directory")
     parser.add_argument("--fold_index", type=int, default=None, help="fold index for k-fold cross-validation (optional)")
+    parser.add_argument("--use_gt_box", action='store_true', help="use ground truth bounding boxes instead of YOLO detection")
     args = parser.parse_args()
 
     predict(
@@ -905,7 +951,8 @@ if __name__ == "__main__":
         args.yolo_weights,
         args.data,
         args.output_dir,
-        args.fold_index
+        args.fold_index,
+        args.use_gt_box
     )
 
 # 單側模型預測

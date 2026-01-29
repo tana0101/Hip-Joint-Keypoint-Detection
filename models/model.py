@@ -23,6 +23,7 @@ from models.efficientnet.efficientnetv2_torch_custom import (
 
 from models.convnextv1.convnext_custom import (
     ConvNeXtTinyCustom,
+    ConvNextTinyMS,
     ConvNeXtSmallCustom,
     ConvNeXtSmallMS,
 )
@@ -88,6 +89,7 @@ MODEL = {
     
     # 基於官方實作的 ConvNeXt 系列模型。
     
+    "convnext_tiny_fpn1234concat": ConvNextTinyMS, # 基於官方庫實作的 Multi-Scale ConvNeXt-Tiny
     "convnext_tiny_custom": ConvNeXtTinyCustom,
     "convnext_small_fpn1234concat": ConvNeXtSmallMS, # 基於官方庫實作的 Multi-Scale ConvNeXt-Small
     "convnext_small_custom": ConvNeXtSmallCustom,

@@ -32,6 +32,7 @@ from pathlib import Path
 
 LOGS_DIR = "logs"
 MODELS_DIR = "weights"
+BBOX_JITTER = True
 BBOX_EXPAND = 0.05
 BBOX_JITTER_PROB = 0.7
 BBOX_JITTER_CENTER = 0.05
@@ -93,7 +94,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         crop_expand=BBOX_EXPAND,
         keep_square=True,
         input_size=input_size,
-        bbox_jitter=True, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
+        bbox_jitter=BBOX_JITTER, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
     )
     val_dataset = HipCropKeypointDataset(
         img_dir = data_dir / 'val' / 'images',
@@ -123,7 +124,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
             crop_expand=BBOX_EXPAND,
             keep_square=True,
             input_size=input_size,
-            bbox_jitter=True, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
+            bbox_jitter=BBOX_JITTER, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
         )
         opposite_val_dataset = HipCropKeypointDataset(
             img_dir=data_dir / 'val' / 'images',

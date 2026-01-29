@@ -98,7 +98,45 @@ class ConvNeXtSmallCustom(nn.Module):
         feat = self._extract_features(x)  # [B, C_in, H, W]
         out = self.head(feat)
         return out
-    
+
+class ConvNextTinyMS(nn.Module):
+    def __init__(self, num_points,
+                 head_type="direct_regression",
+                 input_size: tuple[int, int] = (224, 224),
+                 Nx=None, Ny=None):
+        super().__init__()
+
+        backbone = convnext_block_custom.convnext_tiny(pretrained=True)
+
+        self.model = convnext_block_custom.ConvNeXtFlexible(
+            backbone=backbone,
+            mode="fpn",              # fpn, multi_gap, cls 三種模式
+            fpn_levels=(0, 1, 2, 3),    # 使用 stage1, stage2, stage3, stage4 的特徵圖
+            fpn_out_channels=256,    # FPN 中間層維度
+            fpn_fuse_type="concat",  # FPN 特徵融合方式：concat 或 sum(最上層的map)
+        )
+
+        # 2) 用 dummy 推出 body 輸出的 feature map size
+        with torch.no_grad():
+            dummy = torch.zeros(1, 3, input_size[0], input_size[1])
+            feat_map = self.model.get_feature_map(dummy)   # [1, C_out, H, W]
+            _, C_out, H, W = feat_map.shape
+        
+        # 3) 建 HeadAdapter，專門吃 feature map
+        self.head = HeadAdapter(
+            head_type=head_type,
+            in_channels=C_out,
+            map_size=(H, W),
+            num_points=num_points,
+            Nx=Nx,
+            Ny=Ny,
+        )
+
+    def forward(self, x):
+        feat = self.model.get_feature_map(x)
+        out = self.head(feat)
+        return out
+
 class ConvNeXtSmallMS(nn.Module):
     def __init__(self, num_points,
                  head_type="direct_regression",
@@ -136,3 +174,4 @@ class ConvNeXtSmallMS(nn.Module):
         feat = self.model.get_feature_map(x)
         out = self.head(feat)
         return out
+    
