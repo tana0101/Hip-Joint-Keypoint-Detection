@@ -12,7 +12,7 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from tqdm import tqdm
 
-from .augment import AugmentedKeypointDataset, ProbAugmentedKeypointDataset
+from .augment import ProbAugmentedKeypointDataset
 
 DATASET_CONFIGS_BY_COUNT = {
     12: {
