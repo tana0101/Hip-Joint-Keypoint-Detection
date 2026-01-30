@@ -126,7 +126,7 @@ if __name__ == "__main__":
     # dataset_xray_IHDI/annotations/*.csv
     # dataset_mtddh/annotations/*.csv
     
-    path_ihdi = "dataset/xray_IHDI_6"
+    path_ihdi = "dataset/xray_IHDI_2_clean"
     path_mtddh = "dataset/mtddh_xray_2d"
     
     # 檢查路徑是否存在並執行

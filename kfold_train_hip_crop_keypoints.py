@@ -415,10 +415,10 @@ python kfold_train_hip_crop_keypoints.py \
   --mode outer_inner \
   --inner_val_ratio 0.1 \
   --inner_seed 42 \
-  --model_name convnext_tiny_custom \
+  --model_name convnext_tiny_fpn1234concat \
   --input_size 224 \
   --epochs 200 \
-  --learning_rate 0.01 \
+  --learning_rate 0.0001 \
   --batch_size 64 \
   --side left \
   --mirror \
