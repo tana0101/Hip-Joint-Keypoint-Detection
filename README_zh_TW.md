@@ -33,11 +33,11 @@
 - [Key Features](#key-features)
 - [Dataset](#dataset)
 - [Methodology](#methodology)
+- [Project Structure](#project-structure)
 - [Installation](#installation)
-- [Usage (One-fold)](#usage-onefold-training--evaluation)
+- [Usage (One-fold)](#usage-one-fold-training--evaluation)
 - [Usage (K-Fold)](#usage-k-fold-cross-validation)
 - [Results](#results)
-- [References](#references)
 
 ## Introduction
 
@@ -59,7 +59,6 @@
 
 - 資料存放於 `dataset/` 目錄中。
 - 標註程式位於 `Keypoint-Annotation-Tool/` 目錄中。
-🚧 **資料集下載與整理流程將於後續補充** 🚧
 
 ### 🏥xray_IHDI（主要實驗資料集）
 <img src="src/img/sample_IHDI.jpg" style="width: 30%;"/>
