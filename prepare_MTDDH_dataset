@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# 設定發生錯誤時立即停止
+set -e
+
+echo "=========================================="
+echo "      Start DDH Dataset Setup             "
+echo "=========================================="
+
+# 1. 檢查是否在專案根目錄
+if [ ! -d "dataset" ]; then
+    echo "Error: Directory 'dataset' not found."
+    echo "Please run this script from the project root."
+    exit 1
+fi
+
+# 進入 dataset 資料夾
+cd dataset
+
+# 2. 下載資料集
+if [ -d "mtddh_xray_2d" ]; then
+    echo "Warning: Folder 'mtddh_xray_2d' already exists. Skipping download."
+else
+    echo "Step 1/4: Downloading dataset from GitHub..."
+    
+    # 使用臨時資料夾下載
+    mkdir -p temp_repo
+    cd temp_repo
+    
+    # 初始化 Git
+    git init
+    git remote add origin https://github.com/radoss-org/open-hip-dysplasia.git
+    
+    # 設定稀疏檢出
+    git config core.sparseCheckout true
+    echo "mtddh_xray_2d" >> .git/info/sparse-checkout
+    
+    # 下載
+    echo "Pulling data..."
+    git pull --depth 1 origin main || git pull --depth 1 origin master
+    
+    cd ..
+    
+    # 移動資料
+    if [ -d "temp_repo/mtddh_xray_2d" ]; then
+        mv temp_repo/mtddh_xray_2d .
+        rm -rf temp_repo
+        echo "Download complete."
+    else
+        echo "Error: Download failed."
+        exit 1
+    fi
+fi
+
+# 偵測 python 指令 (python 或 python3)
+PYTHON_CMD="python"
+if ! command -v python > /dev/null 2>&1; then
+    PYTHON_CMD="python3"
+fi
+echo "Using Python command: $PYTHON_CMD"
+
+# 3. 執行 Python 腳本
+echo "------------------------------------------"
+echo "Step 2/4: Running delete.py [Remove Outliers]..."
+$PYTHON_CMD delete.py
+
+echo "------------------------------------------"
+echo "Step 3/4: Running convert_dataset.py [Convert Format]..."
+$PYTHON_CMD convert_dataset.py
+
+echo "------------------------------------------"
+echo "Step 4/4: Running vis.py [Generate Visualization]..."
+$PYTHON_CMD vis.py
+
+# 4. 完成
+cd ..
+echo "=========================================="
+echo "All Done!"
+echo "Dataset location: dataset/mtddh_xray_2d/"
+echo "Vis outputs: dataset/mtddh_xray_2d/vis_output/"
+echo "=========================================="

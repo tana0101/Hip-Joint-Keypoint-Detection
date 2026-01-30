@@ -2,8 +2,8 @@
 
 <div align="center">
   <div>
-    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/README_zh_TW.md">🇹🇼繁體中文</a> |
-    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/README.md">🌏English</a> |
+    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/blob/main/README_zh_TW.md">🇹🇼繁體中文</a> |
+    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/blob/main/README.md">🌏English</a> |
     <a href="https://deepwiki.com/tana0101/Hip-Joint-Keypoint-Detection">📚DeepWiki</a> |
     <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/issues">❓issues</a><!-- |
     📝Paper(尚未發表)-->
@@ -78,7 +78,7 @@
 <img src="src/img/sample_MTDDH.jpg" style="width: 30%;"/>
 
 - 資料來源：[open-hip-dysplasia](https://github.com/radoss-org/open-hip-dysplasia.git)
-- 資料量：1751 張髖關節 X 光影像（已排除異常值）
+- 資料量：1666 張髖關節 X 光影像（已排除異常值）
 - 標註內容：
   - **8 個關鍵點**
   - LeftHip / RightHip 物件標籤
@@ -206,6 +206,16 @@ Hip-Joint-Keypoint-Detection/
 
 ## 🚀Usage (One-fold): Training & Evaluation
 
+### Data Preparation
+
+本專案提供 MTDDH 資料集 作為示範用途。在分割資料集或訓練模型之前，請先執行自動化腳本以下載、清洗並轉換原始資料。
+
+執行準備腳本： 此腳本會自動將資料集下載至 `dataset/mtddh_xray_2d`，並移除異常值、轉換標註格式以及生成視覺化驗證圖。
+```
+chmod +x prepare_MTDDH_dataset.sh
+./prepare_MTDDH_dataset.sh
+```
+
 ### Split Dataset
 
 <details><summary><b>點擊展開指令說明</b></summary>
@@ -230,7 +240,7 @@ options:
 
 常用指令範例：
 ```
-python split.py --dataset dataset/xray_IHDI --out data --train 0.8 --val 0.1 --test 0.1 --seed 42
+python split.py --dataset dataset/mtddh_xray_2d --out data --train 0.8 --val 0.1 --test 0.1 --seed 42
 ```
 
 將會分割出 `data/train`、`data/val`、`data/test` 三個子目錄，並產生物件偵測用的 `data/data.yaml` 檔案供後續訓練使用。
@@ -244,15 +254,15 @@ python split.py --dataset dataset/xray_IHDI --out data --train 0.8 --val 0.1 --t
 常用指令範例：
 ```
 python train_yolo.py \
-  --model yolo12s.pt \
+  --model yolo26s.pt \
   --data data/data.yaml \
   --epochs 300 --imgsz 640 --batch 8 --device 0 \
-  --project runs/train --name yolo12s --pretrained --seed 42 \
+  --project runs/train --name yolo26s --pretrained --seed 42 \
   --fliplr 0.0 --flipud 0.0 --degrees 5.0 \
   --shear 0.0 --perspective 0.0 --mosaic 0.0 --mixup 0.0
 ```
 
-⚠️注意：訓練完成後，請將最佳權重 `(runs/train/exp_name/weights/best.pt)` 移動並重新命名至 `weights/` 資料夾（例如命名為 `yolo12s.pt`），以配合後續推論步驟。
+⚠️注意：訓練完成後，請將最佳權重 `(runs/detect/runs/exp_name/weights/best.pt)` 移動並重新命名至 `weights/` 資料夾（例如命名為 `yolo26s.pt`），以配合後續推論步驟。
 
 #### Step 2: Train Keypoint Detector
 
@@ -294,7 +304,7 @@ options:
 
 常用指令範例：
 ```
-python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext_small_custom --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
+python train_hip_crop_keypoints.py --data_dir data --model_name convnext_small_custom --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
 ```
 
 訓練結果：
@@ -347,7 +357,7 @@ options:
 
 常用指令範例：
 ```
-python3 predict_hip_crop_keypoints.py --model_name convnext_small_custom --kp_left_path weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
+python3 predict_hip_crop_keypoints.py --model_name convnext_small_custom --kp_left_path weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights weights/yolo26s.pt --data data/test --output_dir results
 ```
 
 統計結果會存於 `{output_dir}` 目錄中。
@@ -379,7 +389,7 @@ options:
 常用指令範例：
 ```
 python kfold_split.py \
-  --src dataset/xray_IHDI \
+  --src dataset/mtddh_xray_2d \
   --dst data \
   --k 5 \
   --seed 42 \
@@ -393,15 +403,15 @@ python kfold_split.py \
 常用指令範例：
 ```
 python kfold_train_yolo.py \
-  --model yolo12s.pt \
+  --model yolo26s.pt \
   --data_tpl data/data_fold{fold}.yaml \
   --k 5 \
   --epochs 300 --imgsz 640 --batch 8 --device 0 \
-  --project runs/train --name yolo12s_kfold --pretrained --seed 42 \
+  --project runs/train --name yolo26s_kfold --pretrained --seed 42 \
   --fliplr 0.0 --flipud 0.0 --degrees 5.0 \
   --shear 0.0 --perspective 0.0 --mosaic 0.0 --mixup 0.0
 ```
-⚠️注意：訓練完成後，請將各 Fold 的最佳權重 `(runs/train/exp_name/weights/best.pt)` 移動並重新命名至 `weights/` 資料夾（例如命名為 `yolo12s_fold{i}.pt`），以配合後續推論步驟。
+⚠️注意：訓練完成後，請將各 Fold 的最佳權重 `(runs/detect/runs/yolo26s_kfold_fold{fold}/weights/best.pt)` 移動並重新命名至 `weights/` 資料夾（例如命名為 `yolo26s_fold{i}.pt`），以配合後續推論步驟。
 
 #### Step 2: Train Keypoint Detector
 
@@ -523,7 +533,7 @@ options:
 python kfold_predict_hip_crop_keypoints.py \
   --model_name convnext_small_custom \
   --kp_left_tpl "weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_16_fold{fold}_best.pth" \
-  --yolo_weights weights/yolo12s_fold{fold}.pt \
+  --yolo_weights weights/yolo26s_fold{fold}.pt \
   --data_root data \
   --k 5 \
   --output_root results_kfold
