@@ -36,11 +36,11 @@ The system adopts a **top-down, two-stage pipeline**. First, **YOLO** is used to
 - [Key Features](#key-features)
 - [Dataset](#dataset)
 - [Methodology](#methodology)
+- [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Usage (One-fold)](#usage-one-fold-training--evaluation)
 - [Usage (K-Fold)](#usage-k-fold-cross-validation)
 - [Results](#results)
-- [References](#references)
 
 ## Introduction
 
@@ -50,7 +50,7 @@ In clinical practice, DDH diagnosis heavily relies on manual interpretation and 
 
 In recent years, deep learning has demonstrated outstanding performance in medical image analysis, particularly for tasks such as keypoint detection, angle measurement, and disease grading. This project leverages deep learning models to automatically detect hip joint keypoints and assist clinicians in computing DDH-related indices and classifications.
 
-## ✨ Key Features
+## ✨Key Features
 
 - 📍 **Hip Joint Keypoint Detection**: Automatic prediction of hip joint keypoint coordinates.
 - 📐 **Clinical Metric Measurement**: Supports Acetabular Index (AI) angle computation and IHDI classification.
@@ -58,12 +58,10 @@ In recent years, deep learning has demonstrated outstanding performance in medic
 - 🎯 **Multiple Head Designs**: Supports different keypoint prediction strategies, including Direct Regression and the SimCC family.
 - 🧩 **Modular Design**: Facilitates model replacement, experimental comparison, and extensible research.
 
-## 💾 Dataset
+## 💾Dataset
 
 - Data are stored in the `dataset/` directory.
 - The annotation tool is located in the `Keypoint-Annotation-Tool/` directory.
-
-🚧 **Dataset download and preparation procedures will be provided in future updates** 🚧
 
 ### 🏥 xray_IHDI (Primary Experimental Dataset)
 
@@ -105,7 +103,7 @@ This study uses retrospective data collected from National Cheng Kung University
   <img src="dataset/mtddh_xray_2d_IHDI_Distribution.png" style="width: 49%;" />
 </div>
 
-## 🛠️ Methodology
+## 🛠️Methodology
 
 This project adopts a **top-down, two-stage keypoint detection pipeline**:
 1. **🔍 Object Detection and Unilateral Cropping**: YOLO detects LeftHip / RightHip and crops ROIs to reduce background interference.
@@ -149,7 +147,7 @@ The `Custom` suffix indicates modifications and optimizations based on official 
 - **⚙️ Optimizers**: AdamW
 - **📈 LR Schedulers**: Cosine Annealing + Warmup
 
-## 📂 Project Structure
+## 📂Project Structure
 
 ```text
 Hip-Joint-Keypoint-Detection/
@@ -179,7 +177,7 @@ Hip-Joint-Keypoint-Detection/
 └── README_zh_TW.md                 # 🇹🇼 Traditional Chinese documentation
 ```
 
-## 📦 Installation
+## 📦Installation
 
 Follow the steps below to set up the Python environment and install dependencies.
 
@@ -280,7 +278,7 @@ python3 predict_hip_crop_keypoints.py --model_name convnext_small_custom --kp_le
 
 Results will be saved in the specified output directory.
 
-## 🔄 Usage (K-Fold Cross Validation)
+## 🔄Usage (K-Fold Cross Validation)
 
 K-fold splitting, training, and evaluation are fully supported. Please refer to the original scripts and examples above for detailed usage.
 
@@ -346,30 +344,30 @@ python kfold_predict_hip_crop_keypoints.py \
   --output_root results_kfold
 ```
 
-## 🏆 Results
+## 🏆Results
 
 <img src="src/img/experiment.png" style="width: 99%;"/>
 
 Five-fold cross-validation results using ConvNeXtSmallCustom + SimCC 2D on the xray_IHDI dataset are shown below.
 
-## ⚡ Inference (WIP)
+## ⚡Inference (WIP)
 
 🚧 The clinical interface is under development 🚧
 
 The code in `Hip-Joint-Keypoint-Detection-Tool/` provides a preliminary single-stage keypoint detection interface for research reference only.
 
-## ⚠️ Disclaimer
+## ⚠️Disclaimer
 
 > **For Research Use Only**  
 > This system is intended solely for academic research and technical exchange and **is not a medical device**.  
 > Outputs must not be used for clinical diagnosis, medical decision-making, or treatment.  
 > The software is provided “as is” without any express or implied warranties.
 
-## 📢 Project Note
+## 📢Project Note
 
 Due to current research progress and collaboration considerations, this repository does not publicly release core algorithms and certain key technical details. If you are interested in full technical details or potential academic/commercial collaboration, please open an issue or contact the authors directly.
 
-## ⚖️ License
+## ⚖️License
 
 This project is released under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. See the [LICENSE](LICENSE) file for details.
 
