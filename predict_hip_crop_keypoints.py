@@ -31,6 +31,7 @@ from utils.hip_geometry import (
     draw_diagonal_line,
     draw_h_point,
     unify_keypoints_format,
+    project_to_metric6
 )
 from utils.plots import add_sigma_guides, add_zscore_right_axis
 
@@ -250,17 +251,46 @@ def load_annotations(annotation_path):
 
 # Calculate average distance between predicted and original keypoints
 def calculate_avg_distance(predicted_keypoints, original_keypoints):
-    distances = np.linalg.norm(predicted_keypoints - original_keypoints, axis=1)
-    avg_distance = np.mean(distances)
+    pred_kpts = np.array(predicted_keypoints)
+    gt_kpts = np.array(original_keypoints)
+    
+    if pred_kpts.shape == gt_kpts.shape: # 同資料的比對
+        distances = np.linalg.norm(pred_kpts - gt_kpts, axis=1)
+        avg_distance = np.mean(distances)
+    else: # 不同資料集將採用關鍵的六點進行比對
+        common_pred = project_to_metric6(pred_kpts)
+        common_gt = project_to_metric6(gt_kpts)
+        distances = np.linalg.norm(common_pred - common_gt, axis=1)
+        avg_distance = np.mean(distances)
+    
     return avg_distance
 
 def calc_point_dists(pred_kpts: np.ndarray, gt_kpts: np.ndarray) -> np.ndarray:
     """
-    pred_kpts, gt_kpts: (12, 2)
-    return: per-point euclidean distance, shape (12,)
+    計算每個關鍵點的歐式距離。
+    
+    - 如果格式相同 (8vs8 或 12vs12): 回傳該長度 (8 或 12) 的距離陣列。
+    - 如果格式不同: 自動轉換為 6 點共同格式，回傳長度為 6 的距離陣列。
+    
+    return: shape (N,) where N is 6, 8, or 12
     """
-    diff = pred_kpts.astype(np.float32) - gt_kpts.astype(np.float32)
-    return np.sqrt((diff ** 2).sum(axis=1))
+    p = np.array(pred_kpts)
+    g = np.array(gt_kpts)
+    
+    # 1. 如果形狀一致，進行完整比對
+    if p.shape == g.shape:
+        diff = p - g
+    
+    # 2. 如果形狀不一致，進行 6 點共同比對
+    else:
+        p_common = project_to_metric6(p)
+        g_common = project_to_metric6(g)
+        diff = p_common - g_common
+        
+    # 計算歐式距離 (比起手寫 sqrt(sum) 更快且易讀)
+    dists = np.linalg.norm(diff, axis=1)
+    
+    return dists
 
 def extract_info_from_model_path(model_path):
     """
@@ -549,16 +579,22 @@ def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
     else:
         plt.show()
 
-def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir, fold_index=None, using_gt_box=False):
+def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir, fold_index=None, using_gt_box=False, model_points=None):
     
     # 0. 自動判斷資料集格式
     ann_dir = os.path.join(data_dir, 'annotations')
     ann_files = [f for f in os.listdir(ann_dir) if f.endswith('.csv')]
     if not ann_files: raise ValueError(f"No CSV annotations found in {ann_dir}")
     sample_kpts = load_annotations(os.path.join(ann_dir, ann_files[0]))
-    total_points = sample_kpts.shape[0]
-    points_per_side = total_points // 2
-    print(f"Detected dataset: {total_points} total points ({points_per_side} per side).")
+    total_points = sample_kpts.shape[0] # 資料集是 8 點還是 12 點
+
+    if model_points is None:
+        num_kpts = total_points
+    else:
+        num_kpts = model_points
+
+    points_per_side = num_kpts // 2 
+    print(f"Initializing Model with: {num_kpts} total points ({points_per_side} per side).")
     
     # 1. 檢查並載入模型
     use_left  = (kp_left_path  is not None) and (str(kp_left_path).strip()  != "")
@@ -671,6 +707,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         
         # 1. Avg Distance (Based on Raw Points)
         dist = calculate_avg_distance(kps_pred_raw, kps_gt_raw)
+        # if dist >= 50:
+        #     print(f"[Skip] {fname} distance too large: {dist:.2f}"); continue
         all_avg_distances.append(dist)
         image_labels.append(idx)
 
@@ -942,6 +980,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="results", help="output directory")
     parser.add_argument("--fold_index", type=int, default=None, help="fold index for k-fold cross-validation (optional)")
     parser.add_argument("--use_gt_box", action='store_true', help="use ground truth bounding boxes instead of YOLO detection")
+    parser.add_argument("--model_points", type=int, default=None, help="number of keypoints the model predicts (8 or 12), if not specified, infer from dataset")
     args = parser.parse_args()
 
     predict(
@@ -952,8 +991,18 @@ if __name__ == "__main__":
         args.data,
         args.output_dir,
         args.fold_index,
-        args.use_gt_box
+        args.use_gt_box,
+        args.model_points
     )
 
 # 單側模型預測
 # python3 predict_hip_crop_keypoints.py --model_name convnext_small_fpn1234concat --kp_left_path results/25_simcc/convnext_small_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data "data/test" --output_dir "results"
+"""
+python predict_hip_crop_keypoints.py \
+  --model_name convnext_tiny_fpn1234concat \
+  --kp_left_path results_kfold_ema_ce0.05/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold5_best.pth \
+  --yolo_weights weights/yolo26s_kfold_mtddh_fold5.pt \
+  --data "dataset/xray_IHDI_2_clean" \
+  --output_dir "results_fold5_ema_ce0.05" \
+  --model_points 8
+"""

@@ -4,7 +4,36 @@ import numpy as np
 # 資料集轉換區
 # ============================================================
 
+# 將 8 點或 12 點關鍵點投影成統一的 6 點格式，方便比較
+# 用於在不同資料集間比較關鍵點的距離誤差
+def project_to_metric6(points):
+    """
+    將 (8點 or 12點) 投影成同一組可比較的 6 點:
+    [L_p1, L_p2, L_p4(H), R_p5, R_p6, R_p8(H)]
+    """
+    pts = np.asarray(points, dtype=float)
+
+    if pts.shape[0] == 8:
+        # 8點資料集 indices: L1=0, L2=1, L4=3, R5=4, R6=5, R8=7
+        idx = [0, 1, 3, 4, 5, 7]
+        return pts[idx]
+
+    elif pts.shape[0] == 12:
+        L_p1 = pts[0]                 # P1
+        L_p2 = pts[2]                 # P3 (對應 8點的 p2)
+        L_p4 = 0.5 * (pts[3] + pts[5])# mid(P4,P6) -> H-point
+
+        R_p5 = pts[8]                 # P9 (對應 8點的 p5)
+        R_p6 = pts[6]                 # P7 (對應 8點的 p6)
+        R_p8 = 0.5 * (pts[9] + pts[11])# mid(P10,P12) -> H-point
+
+        return np.stack([L_p1, L_p2, L_p4, R_p5, R_p6, R_p8], axis=0)
+
+    else:
+        raise ValueError(f"Unsupported keypoints count: {pts.shape[0]}")
+
 # 將 MTDDH 資料集轉換為 xray_IHDI 的 12 點格式
+# 用於計算 AI 與 IHDI
 def unify_keypoints_format(points):
     """
     將不同定義的關鍵點統一轉換為 xray_IHDI 的 12 點格式。

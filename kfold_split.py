@@ -172,7 +172,7 @@ if __name__ == "__main__":
     
 '''
 python kfold_split.py \
-  --src dataset/mtddh_xray_2d \
+  --src dataset/xray_IHDI_2_clean \
   --dst data \
   --k 5 \
   --seed 42 \

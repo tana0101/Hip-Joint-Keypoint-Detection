@@ -10,6 +10,7 @@ data/
 xray_IHDI*/
 mtddh_xray_2d/
 runs/
-results
+results*/
 results_kfold*/
 check_left_hip_crops/
+output/
