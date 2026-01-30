@@ -2,8 +2,8 @@
 
 <div align="center">
   <div>
-    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/README_zh_TW.md">🇹🇼繁體中文</a> |
-    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/README.md">🌏English</a> |
+    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/blob/main/README_zh_TW.md">🇹🇼繁體中文</a> |
+    <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/blob/main/README.md">🌏English</a> |
     <a href="https://deepwiki.com/tana0101/Hip-Joint-Keypoint-Detection">📚DeepWiki</a> |
     <a href="https://github.com/tana0101/Hip-Joint-Keypoint-Detection/issues">❓issues</a><!-- |
     📝Paper(尚未發表)-->
@@ -84,7 +84,7 @@ This study uses retrospective data collected from National Cheng Kung University
 <img src="src/img/sample_MTDDH.jpg" style="width: 30%;"/>
 
 - Source: [open-hip-dysplasia](https://github.com/radoss-org/open-hip-dysplasia.git)
-- Size: 1,751 hip X-ray images (after outlier removal)
+- Size: 1,666 hip X-ray images (after outlier removal)
 - Annotations:
   - **8 keypoints**
   - LeftHip / RightHip object labels
@@ -212,7 +212,17 @@ Follow the steps below to set up the Python environment and install dependencies
    pip install -r requirements.txt
 ```
 
-## 🚀 Usage (One-fold): Training & Evaluation
+## 🚀Usage (One-fold): Training & Evaluation
+
+### Data Preparation
+
+We provide the MTDDH dataset for demonstration purposes. Before splitting the dataset or training, run the automation script to download, clean, and convert the raw data.
+
+Run Preparation Script: This script will automatically download the dataset to `dataset/mtddh_xray_2d`, remove outliers, convert annotations, and generate visualization checks.
+```
+chmod +x prepare_MTDDH_dataset.sh
+./prepare_MTDDH_dataset.sh
+```
 
 ### Split Dataset
 
@@ -229,7 +239,7 @@ Ultralytics data.yaml
 
 Example command:
 ```
-python split.py --dataset dataset/xray_IHDI --out data --train 0.8 --val 0.1 --test 0.1 --seed 42
+python split.py --dataset dataset/mtddh_xray_2d --out data --train 0.8 --val 0.1 --test 0.1 --seed 42
 ```
 
 This will generate `data/train`, `data/val`, and `data/test`, along with `data/data.yaml` for object detection training.
@@ -242,21 +252,21 @@ The project uses a two-stage pipeline: YOLO-based hip detection followed by unil
 
 ```
 python train_yolo.py \
-  --model yolo12s.pt \
+  --model yolo26s.pt \
   --data data/data.yaml \
   --epochs 300 --imgsz 640 --batch 8 --device 0 \
-  --project runs/train --name yolo12s --pretrained --seed 42 \
+  --project runs/train --name yolo26s --pretrained --seed 42 \
   --fliplr 0.0 --flipud 0.0 --degrees 5.0 \
   --shear 0.0 --perspective 0.0 --mosaic 0.0 --mixup 0.0
 ```
 
-⚠️ After training, move and rename the best weight `(runs/train/exp_name/weights/best.pt)` to the `weights/` directory (e.g., `yolo12s.pt`).
+⚠️ After training, move and rename the best weight `(runs/detect/runs/exp_name/weights/best.pt)` to the `weights/` directory (e.g., `yolo26s.pt`).
 
 #### Step 2: Train Keypoint Detector
 
 Example:
 ```
-python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext_small_custom --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
+python train_hip_crop_keypoints.py --data_dir data --model_name convnext_small_custom --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
 ```
 
 Training outputs include best weights, logs, and plots saved in `weights/` and `logs/`.
@@ -265,7 +275,7 @@ Training outputs include best weights, logs, and plots saved in `weights/` and `
 
 Example:
 ```
-python3 predict_hip_crop_keypoints.py --model_name convnext_small_custom --kp_left_path weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights models/yolo12s.pt --data data/test --output_dir results
+python3 predict_hip_crop_keypoints.py --model_name convnext_small_custom --kp_left_path weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_32_best.pth --yolo_weights weights/yolo26s.pt --data data/test --output_dir results
 ```
 
 Results will be saved in the specified output directory.
@@ -273,6 +283,68 @@ Results will be saved in the specified output directory.
 ## 🔄 Usage (K-Fold Cross Validation)
 
 K-fold splitting, training, and evaluation are fully supported. Please refer to the original scripts and examples above for detailed usage.
+
+### Split Dataset
+
+Example:
+```
+python kfold_split.py \
+  --src dataset/mtddh_xray_2d \
+  --dst data \
+  --k 5 \
+  --seed 42 \
+  --overwrite
+```
+
+### Training
+
+#### Step 1: Train YOLO Detector
+
+```
+python kfold_train_yolo.py \
+  --model yolo26s.pt \
+  --data_tpl data/data_fold{fold}.yaml \
+  --k 5 \
+  --epochs 300 --imgsz 640 --batch 8 --device 0 \
+  --project runs/train --name yolo26s_kfold --pretrained --seed 42 \
+  --fliplr 0.0 --flipud 0.0 --degrees 5.0 \
+  --shear 0.0 --perspective 0.0 --mosaic 0.0 --mixup 0.0
+```
+
+⚠️ Note: After training is complete, please move and rename the best weights for each fold `(runs/detect/runs/yolo26s_kfold_fold{fold}/weights/best.pt)` to the `weights/` folder (e.g., as `yolo26s_fold{i}.pt`) for subsequent inference steps.
+
+#### Step 2: Train Keypoint Detector
+
+```
+python kfold_train_hip_crop_keypoints.py \
+  --data_root data \
+  --k 5 \
+  --mode outer_inner \
+  --inner_val_ratio 0.1 \
+  --inner_seed 42 \
+  --model_name convnext_small_custom \
+  --input_size 224 \
+  --epochs 200 \
+  --learning_rate 0.0001 \
+  --batch_size 16 \
+  --side left \
+  --mirror \
+  --head_type simcc_2d \
+  --split_ratio 3.0 \
+  --sigma 7.0
+```
+
+### Evaluation
+
+```
+python kfold_predict_hip_crop_keypoints.py \
+  --model_name convnext_small_custom \
+  --kp_left_tpl "weights/convnext_small_custom_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_16_fold{fold}_best.pth" \
+  --yolo_weights weights/yolo26s_fold{fold}.pt \
+  --data_root data \
+  --k 5 \
+  --output_root results_kfold
+```
 
 ## 🏆 Results
 
