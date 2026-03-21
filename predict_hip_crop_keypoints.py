@@ -13,6 +13,7 @@ from sklearn.metrics import (
     accuracy_score,
     precision_recall_fscore_support,
     r2_score,
+    cohen_kappa_score
 )
 from scipy.stats import pearsonr, spearmanr, kendalltau
 from ultralytics import YOLO
@@ -463,9 +464,9 @@ def draw_comparison_figure(
     plt.close()
 
 def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right_preds, right_gts, save_dir):
+    label_map = {'I': 0, 'II': 1, 'III': 2, 'IV': 3}
     labels = ['I', 'II', 'III', 'IV']
     
-    # 準備數據分組
     data_groups = {
         'left': (left_preds, left_gts, 'Left IHDI', 'Blues'),
         'right': (right_preds, right_gts, 'Right IHDI', 'Greens'),
@@ -475,26 +476,44 @@ def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right
     results = {}
 
     for name, (preds, gts, title, cmap) in data_groups.items():
-        # 1. 計算各項指標
-        acc = accuracy_score(gts, preds)
+        valid_pairs = [(p, g) for p, g in zip(preds, gts) if p in label_map and g in label_map]
         
-        # 使用 weighted average 來處理多類別 (Multiclass)
-        # zero_division=0 避免當某類別預測數為0時報錯
-        p, r, f1, _ = precision_recall_fscore_support(gts, preds, labels=labels, average='weighted', zero_division=0)
+        if not valid_pairs:
+            print(f"Warning: No valid labels found for group {name}. Skipping...")
+            continue
+            
+        v_preds, v_gts = zip(*valid_pairs) # 拆解回預測與真值
         
-        # 存入結果字典
+        # 轉換成數值序列用於相關性計算
+        preds_numeric = [label_map[p] for p in v_preds]
+        gts_numeric = [label_map[g] for g in v_gts]
+
+        # --- 計算新增指標 ---
+        # Weighted Kappa (Quadratic 常用於醫學等級)
+        wk = cohen_kappa_score(v_gts, v_preds, labels=labels, weights='quadratic')
+        
+        # Kendall's Tau
+        kt, _ = kendalltau(gts_numeric, preds_numeric)
+        
+        # 原有指標
+        acc = accuracy_score(v_gts, v_preds)
+        p, r, f1, _ = precision_recall_fscore_support(v_gts, v_preds, labels=labels, average='weighted', zero_division=0)
+        
         results[f'acc_{name}'] = acc
         results[f'prec_{name}'] = p
         results[f'rec_{name}'] = r
         results[f'f1_{name}'] = f1
+        results[f'weighted_kappa_{name}'] = wk
+        results[f'kendall_tau_{name}'] = kt
 
-        # 2. 繪製混淆矩陣 (標題增加 F1 分數展示)
-        cm = confusion_matrix(gts, preds, labels=labels)
+        # --- 繪圖 (增加指標顯示) ---
+        cm = confusion_matrix(v_gts, v_preds, labels=labels)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
         
         fig, ax = plt.subplots(figsize=(6, 5))
         disp.plot(ax=ax, cmap=cmap)
-        ax.set_title(f'{title}\nAcc: {acc:.2%} | F1: {f1:.2%} | Prec: {p:.2%} | Rec: {r:.2%}')
+        # 標題加入 WK 與 KT
+        ax.set_title(f'{title}\nAcc: {acc:.2%} | F1: {f1:.2%}\nWK(Quad): {wk:.3f} | Kendall: {kt:.3f}')
         plt.tight_layout()
         fig.savefig(os.path.join(save_dir, f"confusion_matrix_{name}.png"))
         plt.close(fig)
@@ -707,8 +726,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         
         # 1. Avg Distance (Based on Raw Points)
         dist = calculate_avg_distance(kps_pred_raw, kps_gt_raw)
-        # if dist >= 50:
-        #     print(f"[Skip] {fname} distance too large: {dist:.2f}"); continue
+        if dist >= 50:
+            print(f"[Skip] {fname} distance too large: {dist:.2f}"); continue
         all_avg_distances.append(dist)
         image_labels.append(idx)
 
@@ -936,21 +955,27 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         "avg_ai_error_left": avg_error_left,
         "avg_ai_error_right": avg_error_right,
 
-        # --- Accuracy, Precision, Recall, F1 ---
+        # --- Accuracy, Precision, Recall, F1, Weighted Kappa, Kendall's Tau for Left, Right, and All ---
         "acc_left": cls_metrics['acc_left'],
         "prec_left": cls_metrics['prec_left'],
         "rec_left": cls_metrics['rec_left'],
         "f1_left": cls_metrics['f1_left'],
+        "weighted_kappa_left": cls_metrics['weighted_kappa_left'],
+        "kendall_tau_left": cls_metrics['kendall_tau_left'],
 
         "acc_right": cls_metrics['acc_right'],
         "prec_right": cls_metrics['prec_right'],
         "rec_right": cls_metrics['rec_right'],
         "f1_right": cls_metrics['f1_right'],
+        "weighted_kappa_right": cls_metrics['weighted_kappa_right'],
+        "kendall_tau_right": cls_metrics['kendall_tau_right'],
 
         "acc_all": cls_metrics['acc_all'],
         "prec_all": cls_metrics['prec_all'],
         "rec_all": cls_metrics['rec_all'],
         "f1_all": cls_metrics['f1_all'],
+        "weighted_kappa_all": cls_metrics['weighted_kappa_all'],
+        "kendall_tau_all": cls_metrics['kendall_tau_all'],
         # -----------------------------------------------------
 
         "r_left": r_left,
@@ -1000,9 +1025,9 @@ if __name__ == "__main__":
 """
 python predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_path results_kfold_ema_ce0.05/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold5_best.pth \
-  --yolo_weights weights/yolo26s_kfold_mtddh_fold5.pt \
-  --data "dataset/xray_IHDI_2_clean" \
+  --kp_left_path weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold5_best.pth \
+  --yolo_weights weights/yolo26s_kfold_xray_IHDI_fold5.pt \
+  --data "dataset/mtddh_xray_2d" \
   --output_dir "results_fold5_ema_ce0.05" \
-  --model_points 8
+  --model_points 12
 """
