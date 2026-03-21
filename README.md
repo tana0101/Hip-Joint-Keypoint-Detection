@@ -35,7 +35,7 @@ The system adopts a **top-down, two-stage pipeline**. First, **YOLO** is used to
 - [Introduction](#introduction)
 - [Key Features](#key-features)
 - [Dataset](#dataset)
-- [Methodology](#methodology)
+- [Methodology](#-methodology)
 - [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Usage (One-fold)](#usage-one-fold-training--evaluation)
@@ -103,7 +103,7 @@ This study uses retrospective data collected from National Cheng Kung University
   <img src="dataset/mtddh_xray_2d_IHDI_Distribution.png" style="width: 49%;" />
 </div>
 
-## 🛠️Methodology
+## 🛠️ Methodology
 
 This project adopts a **top-down, two-stage keypoint detection pipeline**:
 1. **🔍 Object Detection and Unilateral Cropping**: YOLO detects LeftHip / RightHip and crops ROIs to reduce background interference.

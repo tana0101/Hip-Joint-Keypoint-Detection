@@ -3,8 +3,8 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
-from sklearn.metrics import r2_score, confusion_matrix, ConfusionMatrixDisplay, accuracy_score, precision_recall_fscore_support
-from scipy.stats import pearsonr
+from sklearn.metrics import r2_score, confusion_matrix, ConfusionMatrixDisplay, accuracy_score, precision_recall_fscore_support, cohen_kappa_score
+from scipy.stats import pearsonr, kendalltau
 
 # ---------------------------------------------------------
 # 1. 引用計算邏輯
@@ -72,6 +72,68 @@ def plot_avg_dist_bar_custom(distances, names, save_path):
     
     plt.tight_layout()
     plt.savefig(save_path)
+    plt.close()
+
+def plot_ai_angle_error_bar_custom(errors_l, errors_r, names, save_path):
+    """
+    繪製每張圖片的 AI 角度誤差長條圖 (Left/Right 分開顯示)
+    - 會畫 Left/Right 平均線
+    - 會畫 Overall 的 μ 與 μ±1σ 輔助線
+    - 右側加上 z-score 軸
+    - x 軸 tick 會自動稀疏顯示（避免太擠）
+    """
+    fig, ax = plt.subplots(figsize=(16, 6))
+
+    # --- 資料準備 ---
+    errors_l = np.asarray(errors_l, dtype=float)
+    errors_r = np.asarray(errors_r, dtype=float)
+    indices = np.arange(len(names))
+
+    # --- Bar plot (仿你的範例) ---
+    bar_width = 0.4
+    ax.bar(indices - bar_width/2, errors_l, width=bar_width, label='Left AI Error',  color='magenta')
+    ax.bar(indices + bar_width/2, errors_r, width=bar_width, label='Right AI Error', color='crimson')
+
+    # --- Left/Right 平均線 ---
+    avg_error_left  = float(np.mean(errors_l)) if len(errors_l) > 0 else 0.0
+    avg_error_right = float(np.mean(errors_r)) if len(errors_r) > 0 else 0.0
+    ax.axhline(avg_error_left,  linestyle='--', label=f'Avg Left Error: {avg_error_left:.2f}°',  color='magenta')
+    ax.axhline(avg_error_right, linestyle='--', label=f'Avg Right Error: {avg_error_right:.2f}°', color='crimson')
+
+    # --- Overall μ, σ (合併 L/R) ---
+    combined_errors = np.concatenate([errors_l, errors_r], axis=0) if (len(errors_l) + len(errors_r)) > 0 else np.array([0.0])
+    mu_err  = float(np.mean(combined_errors))
+    std_err = float(np.std(combined_errors, ddof=1)) if len(combined_errors) > 1 else 0.0
+
+    add_sigma_guides(
+        ax, mu=mu_err, std=std_err,
+        mu_label=f'Overall AI Error(μ): {mu_err:.2f}°',
+        label=f'μ ± 1σ (σ={std_err:.2f})',
+        mu_color='blue', color='red'
+    )
+    add_zscore_right_axis(ax, mu=mu_err, std=std_err)
+
+    # --- Labels / Title ---
+    ax.set_xlabel('Image Index')
+    ax.set_ylabel('AI Angle Error (°)')
+    ax.set_title(f'AI Angle Errors per Image (mu={mu_err:.2f}°)')
+
+    # --- X 軸 tick（跟 plot_avg_dist_bar_custom 一致：動態稀疏顯示） ---
+    tick_step = max(1, len(names) // 30)  # 目標顯示約 30 個刻度
+    target_ticks = indices[::tick_step]
+    target_labels = [str(i) for i in target_ticks]
+
+    ax.set_xticks(target_ticks)
+    ax.set_xticklabels(target_labels, rotation=0, fontsize=10)
+
+    # --- Legend 去重 ---
+    handles, labels = ax.get_legend_handles_labels()
+    from collections import OrderedDict
+    by_label = OrderedDict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
+
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches='tight')
     plt.close()
 
 def draw_dataset_comparison(
@@ -174,20 +236,39 @@ def plot_ai_angle_scatter_custom(list_b, list_a, title_prefix, save_path, label_
 
 def save_confusion_matrix_custom(preds, gts, title, save_path, label_x="Dataset B (Ref)", label_y="Dataset A"):
     labels = ['I', 'II', 'III', 'IV']
+    # 建立映射以計算 Kendall Correlation (必須是數值順序)
+    label_map = {l: i for i, l in enumerate(labels)}
+    preds_numeric = [label_map[p] for p in preds]
+    gts_numeric = [label_map[g] for g in gts]
+
+    # 1. 計算原有的基礎指標
     acc = accuracy_score(gts, preds)
     p, r, f1, _ = precision_recall_fscore_support(gts, preds, labels=labels, average='weighted', zero_division=0)
     
+    # 2. 計算新增的權重指標
+    # weights='quadratic' 最符合醫學診斷對於嚴重錯判的懲罰邏輯
+    weighted_kappa = cohen_kappa_score(gts, preds, labels=labels, weights='quadratic')
+    
+    # Kendall's Tau 衡量等級排序的一致性
+    tau, _ = kendalltau(gts_numeric, preds_numeric)
+    
+    # 3. 繪製混淆矩陣
     cm = confusion_matrix(gts, preds, labels=labels)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
     
     fig, ax = plt.subplots(figsize=(6, 5))
-    disp.plot(ax=ax, cmap='Blues')
+    disp.plot(ax=ax, cmap='Blues', values_format='d') # values_format='d' 確保顯示整數
     
     ax.set_xlabel(label_x)
     ax.set_ylabel(label_y)
-    ax.set_title(f'{title}\nAcc: {acc:.2%} | F1: {f1:.2%}')
+    
+    # 在標題中展示所有關鍵指標
+    # WK: Weighted Kappa, KT: Kendall's Tau
+    ax.set_title(f'{title}\nAcc: {acc:.2%} | F1: {f1:.2%}\nWK(Quad): {weighted_kappa:.3f} | Kendall: {tau:.3f}', 
+                 fontsize=10)
+    
     plt.tight_layout()
-    fig.savefig(save_path)
+    fig.savefig(save_path, dpi=300) # 提高解析度
     plt.close(fig)
 
 # ---------------------------------------------------------
@@ -276,14 +357,48 @@ def main(args):
     # ---------------------------------------------------------
     print("Generating summary plots...")
     
-    # 1. Avg Distance Bar Chart (補回這裡)
+    # 1. Avg Distance Bar Chart
     plot_avg_dist_bar_custom(
         metrics['avg_dists'], 
         metrics['names'], 
         os.path.join(out_dir, "avg_dists.png")
     )
+    
+    # Avg Distance Histogram
+    plt.figure(figsize=(8, 6))
+    plt.hist(metrics['avg_dists'], bins=30, alpha=0.75, edgecolor="black")
 
-    # 2. Confusion Matrix
+    plt.xlabel("Average Pixel Distance")
+    plt.ylabel("Count")
+    plt.title("Histogram of Avg Distances Between Datasets")
+    plt.tight_layout()
+    hist_dist_path = os.path.join(out_dir, "hist_avg_dists.png")
+    plt.savefig(hist_dist_path, dpi=300)
+    plt.close()
+    
+    # 2. Avg AI Angle Error Bar Chart
+    plot_ai_angle_error_bar_custom(
+        metrics['ai_diff_l'],
+        metrics['ai_diff_r'],
+        metrics['names'],
+        os.path.join(out_dir, "ai_angle_errors.png")
+    )
+    
+    # Avg AI Angle Error Histogram
+    ai_avg_errors = [ (l + r) / 2 for l, r in zip(metrics['ai_diff_l'], metrics['ai_diff_r']) ]
+    plt.figure(figsize=(8, 6))
+    plt.hist(ai_avg_errors, bins=30, alpha=0.75, edgecolor="black")
+
+    plt.xlabel("Avg AI Angle Error (°)")
+    plt.ylabel("Count")
+    plt.title("Histogram of Avg AI Angle Error (All folds)")
+    plt.tight_layout()
+    hist_ai_path = os.path.join(out_dir, "hist_ai_error.png")
+    plt.savefig(hist_ai_path, dpi=300)
+    plt.close()
+    
+
+    # 3. Confusion Matrix
     save_confusion_matrix_custom(
         metrics['quad_a_l'] + metrics['quad_a_r'], 
         metrics['quad_b_l'] + metrics['quad_b_r'],
@@ -292,7 +407,7 @@ def main(args):
         label_x=label_b_name, label_y=label_a_name
     )
 
-    # 3. Scatter Plots
+    # 4. Scatter Plots
     all_a = metrics['ai_a_l'] + metrics['ai_a_r']
     all_b = metrics['ai_b_l'] + metrics['ai_b_r']
     plot_ai_angle_scatter_custom(
@@ -301,7 +416,7 @@ def main(args):
         label_x=label_b_name, label_y=label_a_name
     )
 
-    # 4. Pixel vs Angle
+    # 5. Pixel vs Angle
     ai_err_avg = [(l+r)/2 for l, r in zip(metrics['ai_diff_l'], metrics['ai_diff_r'])]
     plot_pixel_vs_angle_error(metrics['avg_dists'], ai_err_avg, 
                               os.path.join(out_dir, "scatter_pix_vs_angle.png"))
@@ -324,9 +439,9 @@ if __name__ == "__main__":
     
 '''
 python compare_dataset_annotations.py \
-  --dataset_a "dataset/xray_IHDI_1" \
-  --dataset_b "dataset/xray_IHDI_2" \
-  --output_dir "output/Intra_Observer_Analysis" \
+  --dataset_a "dataset/xray_IHDI_1_clean" \
+  --dataset_b "dataset/xray_IHDI_2_clean" \
+  --output_dir "output/Intra_Observer_Analysis(clean)" \
   --label_a "1st Reading" \
   --label_b "2nd Reading"
 '''

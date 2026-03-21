@@ -54,6 +54,7 @@ def main():
         default="results_kfold_test",
         help="每個 fold 的輸出根目錄（下層會自動建立 fold1, fold2, ...）",
     )
+    parser.add_argument("--model_points", type=int, default=None, help="number of keypoints the model predicts (8 or 12), if not specified, infer from dataset")
     args = parser.parse_args()
 
     data_root = os.path.abspath(args.data_root)
@@ -117,6 +118,7 @@ def main():
             data_dir,
             fold_output_dir,
             fold_index=fold_idx,
+            model_points=args.model_points,
         )
         metrics["fold_index"] = fold_idx
         all_fold_metrics.append(metrics)
@@ -278,6 +280,14 @@ python kfold_predict_hip_crop_keypoints.py \
   --k 5 \
   --output_root results_kfold
 """
-# 
-# 
-# 
+
+"""
+python kfold_predict_hip_crop_keypoints.py \
+  --model_name convnext_tiny_fpn1234concat \
+  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
+  --yolo_weights weights/yolo12s_kfold_mtddh_fold{fold}.pt \
+  --data_root data \
+  --k 5 \
+  --output_root results_kfold \
+  --model_points 8
+"""

@@ -32,7 +32,7 @@
 - [Introduction](#introduction)
 - [Key Features](#key-features)
 - [Dataset](#dataset)
-- [Methodology](#methodology)
+- [Methodology](#-methodology)
 - [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Usage (One-fold)](#usage-one-fold-training--evaluation)
@@ -96,7 +96,7 @@
   <img src="dataset/mtddh_xray_2d_IHDI_Distribution.png" style="width: 49%;" />
 </div>
 
-## 🛠️Methodology
+## 🛠️ Methodology
 
 本專案採用由上而下（Top-down）的兩階段關鍵點偵測流程：
 1. **🔍 物件偵測與單邊裁切**：以 YOLO 偵測 LeftHip / RightHip，裁切 ROI（降低背景干擾）。

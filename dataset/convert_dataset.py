@@ -3,7 +3,6 @@ import json
 import cv2
 import glob
 import shutil
-import csv
 
 # ================= 設定區域 =================
 # 基礎資料夾 (所有東西都在這裡面)

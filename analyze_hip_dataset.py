@@ -21,7 +21,7 @@ def load_annotations(annotation_path):
 # ---------------------------------------------------------
 def analyze_and_plot_dataset(dataset_name, dataset_root):
     """
-    讀取指定資料夾下的 annotations，計算 AI 與 IHDI，畫圖並儲存。
+    讀取指定資料夾下的 annotations，計算 AI 與 IHDI，畫圖並儲存，同時輸出 GT 的 CSV 檔案。
     """
     print(f"--- Analyzing Dataset: {dataset_name} ---")
     
@@ -32,11 +32,14 @@ def analyze_and_plot_dataset(dataset_name, dataset_root):
         print(f"Warning: No CSV files found in {annotation_dir}")
         return
 
-    # 初始化儲存列表
+    # 初始化畫圖用的儲存列表
     ai_left_list = []
     ai_right_list = []
     ai_avg_list = []
     ihdi_quadrants_all = [] 
+    
+    # 初始化匯出 CSV 用的儲存列表
+    csv_export_data = []
 
     # --- 批次處理資料 ---
     for csv_path in csv_files:
@@ -54,8 +57,41 @@ def analyze_and_plot_dataset(dataset_name, dataset_root):
             q_l, q_r = classify_quadrant_ihdi(kps_unified)
             ihdi_quadrants_all.extend([q_l, q_r]) 
             
+            # ---------------------------------------------------------
+            # 準備匯出至 CSV 的資料
+            # ---------------------------------------------------------
+            # 1. 檔名轉換 (將 .csv 換成 .jpg)
+            base_name = os.path.basename(csv_path)
+            img_filename = base_name.replace('.csv', '.jpg')
+            
+            # 2. 仿造模型輸出的 metrics 字串格式
+            # 使用 round() 控制小數點，並確保格式與預期完全相符
+            metrics_str = f"{{'metrics': [{{'ace_index_left': np.float64({round(ai_l, 1)})}}, {{'ace_index_right': np.float64({round(ai_r, 1)})}}, {{'ihdi_grade_left': {q_l}}}, {{'ihdi_grade_right': {q_r}}}], 'keyphrase': 'default_xray', 'dev_metrics': {{}}}}"
+            
+            # 3. 仿造模型輸出的 landmarks 字串格式 (使用原始的 8 個點 kps_raw)
+            # 將 numpy array 的座標轉為整數並串接
+            pts_list = [f"p{i+1}=({int(pt[0])}, {int(pt[1])})" for i, pt in enumerate(kps_raw)]
+            landmarks_str = f"Landmarks({', '.join(pts_list)})"
+            
+            # 寫入字典
+            csv_export_data.append({
+                "filename": img_filename,
+                "metrics": metrics_str,
+                "landmarks": landmarks_str
+            })
+            
         except Exception as e:
             print(f"Error processing {os.path.basename(csv_path)}: {e}")
+
+    # ==========================================
+    # 輸出 CSV 檔案
+    # ==========================================
+    if csv_export_data:
+        df_export = pd.DataFrame(csv_export_data)
+        csv_save_path = os.path.join(dataset_root, f'{dataset_name}_GT_metrics.csv')
+        # pandas 預設會自動處理字串內有逗號或引號的跳脫問題 (Quoting)
+        df_export.to_csv(csv_save_path, index=False)
+        print(f"✅ Saved GT metrics CSV to: {csv_save_path}")
 
     # ==========================================
     # Plot 1: AI Angle Histogram (Left, Right, Avg)
@@ -71,7 +107,6 @@ def analyze_and_plot_dataset(dataset_name, dataset_root):
         
         mean_val = np.mean(data)
         std_val = np.std(data)
-        # 英文統計資訊
         text_str = f'Mean: {mean_val:.2f}°\nStd: {std_val:.2f}'
         ax.text(0.95, 0.95, text_str, transform=ax.transAxes, fontsize=12,
                 verticalalignment='top', horizontalalignment='right',
@@ -83,7 +118,6 @@ def analyze_and_plot_dataset(dataset_name, dataset_root):
 
     plt.tight_layout()
     
-    # --- Save Plot 1 ---
     save_path_ai = os.path.join(dataset_root, f'{dataset_name}_AI_Distribution.png')
     plt.savefig(save_path_ai, dpi=300)
     print(f"Saved AI plot to: {save_path_ai}")
@@ -97,11 +131,10 @@ def analyze_and_plot_dataset(dataset_name, dataset_root):
     
     counter = Counter(ihdi_quadrants_all)
     labels = ['I', 'II', 'III', 'IV']
-    counts = [counter[label] for label in labels]
+    counts = [counter.get(label, 0) for label in labels] # 使用 .get() 避免報錯
     
     bars = plt.bar(labels, counts, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'], alpha=0.8, edgecolor='black')
     
-    # 英文標題
     plt.title(f'{dataset_name} - IHDI Quadrant Classification Stats (Total Hips: {len(ihdi_quadrants_all)})', fontsize=15)
     plt.xlabel('IHDI Quadrant', fontsize=12)
     plt.ylabel('Count', fontsize=12)
@@ -113,7 +146,6 @@ def analyze_and_plot_dataset(dataset_name, dataset_root):
     
     plt.tight_layout()
 
-    # --- Save Plot 2 ---
     save_path_ihdi = os.path.join(dataset_root, f'{dataset_name}_IHDI_Distribution.png')
     plt.savefig(save_path_ihdi, dpi=300)
     print(f"Saved IHDI plot to: {save_path_ihdi}")
@@ -121,15 +153,9 @@ def analyze_and_plot_dataset(dataset_name, dataset_root):
     plt.show()
 
 if __name__ == "__main__":
-    # 請將此處路徑修改為您實際的資料夾路徑
-    # 範例結構: 
-    # dataset_xray_IHDI/annotations/*.csv
-    # dataset_mtddh/annotations/*.csv
-    
     path_ihdi = "dataset/xray_IHDI_2_clean"
     path_mtddh = "dataset/mtddh_xray_2d"
     
-    # 檢查路徑是否存在並執行
     if os.path.exists(path_ihdi):
         analyze_and_plot_dataset("xray_IHDI", path_ihdi)
     else:
