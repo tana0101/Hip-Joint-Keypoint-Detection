@@ -1,9 +1,11 @@
-# split.py
 import argparse
 import shutil
-import random
+import json
 from pathlib import Path
 from typing import List
+
+# 改腳本用於從 JSON 分割檔（dataset_splits.json）將資料集切分成 train/val/test，並產生 Ultralytics 相容的 data.yaml。
+# 為了能符合 MTDDH 的原始訓練方式。
 
 def list_files_by_stem(folder: Path, exts):
     """
@@ -65,13 +67,27 @@ def write_data_yaml(out_base: Path, names_dict: dict) -> None:
     yaml_lines.append("")
     (out_base / "data.yaml").write_text("\n".join(yaml_lines), encoding="utf-8")
 
-def main(dataset: str, out: str = "data",
-         train_ratio: float = 0.8, val_ratio: float = 0.1, test_ratio: float = 0.1,
-         seed: int = 42):
-    random.seed(seed)
-
+def main(dataset: str, splits_file: str, out: str = "data", overwrite: bool = False):
     dataset_dir = Path(dataset)
     assert dataset_dir.exists(), f"找不到資料夾：{dataset_dir}"
+
+    splits_path = Path(splits_file)
+    assert splits_path.exists(), f"找不到 JSON 分割檔：{splits_path}"
+
+    out_base = Path(out)
+    if out_base.exists():
+        if overwrite:
+            print(f"[INFO] 輸出資料夾 {out_base} 已存在，將被刪除後重建。")
+            shutil.rmtree(out_base)
+        else:
+            raise FileExistsError(f"輸出資料夾 {out_base} 已存在。請使用 --overwrite 參數來允許覆蓋。")
+    
+    # 讀取 JSON
+    with open(splits_path, 'r', encoding='utf-8') as f:
+        splits_data = json.load(f)
+    
+    json_train = splits_data.get("splits", {}).get("train", [])
+    json_val = splits_data.get("splits", {}).get("val", [])
 
     # 子資料夾（若不存在就視為缺席，不強制）
     subdirs = {
@@ -111,32 +127,20 @@ def main(dataset: str, out: str = "data",
     for modal in present_modalities:
         common_stems &= set(stem_maps[modal].keys())
 
-    # 若有 modality 缺檔會被排除，給出提示
-    total_images = len(stem_maps["images"])
-    kept = len(common_stems)
-    dropped = total_images - kept
-    if dropped > 0:
-        print(f"[WARN] 有 {dropped} 張影像無法在所有 present modalities 中找到對應檔，將被排除。")
-    if kept == 0:
-        raise RuntimeError("交集為空，請確認子資料夾中的檔名（不含副檔名）對得上。")
+    # 篩選存在於實際資料夾中的 JSON 名單
+    train_stems = [s for s in json_train if s in common_stems]
+    val_stems = [s for s in json_val if s in common_stems]
+    
+    # 將 val 名單複製給 test
+    test_stems = val_stems.copy()
 
-    # 依比例切分
-    common_stems = sorted(common_stems)
-    random.shuffle(common_stems)
-
-    n = len(common_stems)
-    # 檢查比例
-    s = train_ratio + val_ratio + test_ratio
-    if abs(s - 1.0) > 1e-6:
-        raise ValueError(f"train+val+test 必須等於 1，當前為 {s}")
-
-    train_size = int(train_ratio * n)
-    val_size = int(val_ratio * n)
-    test_size = n - train_size - val_size
-
-    train_stems = common_stems[:train_size]
-    val_stems = common_stems[train_size:train_size + val_size]
-    test_stems = common_stems[train_size + val_size:]
+    # 檢查是否有在 JSON 內但實際檔案缺失的情況
+    missing_train = set(json_train) - set(train_stems)
+    missing_val = set(json_val) - set(val_stems)
+    if missing_train:
+        print(f"[WARN] JSON 中的 train 檔案遺失或資料不齊全：{len(missing_train)} 筆")
+    if missing_val:
+        print(f"[WARN] JSON 中的 val 檔案遺失或資料不齊全：{len(missing_val)} 筆")
 
     out_base = Path(out)
     for split in ["train", "val", "test"]:
@@ -149,6 +153,7 @@ def main(dataset: str, out: str = "data",
             dst = out_base / split / out_modal / src.name
             shutil.copy2(src, dst)
 
+    # 執行複製
     for stem in train_stems:
         copy_one(stem, "train")
     for stem in val_stems:
@@ -165,33 +170,34 @@ def main(dataset: str, out: str = "data",
 
     # 總結
     print("=== Split Summary ===")
-    print(f"Dataset root    : {dataset_dir}")
-    print(f"Output root     : {out_base}")
-    print(f"Present modalities : {present_modalities}（輸出時 yolo_labels -> labels）")
-    print(f"Total images (in images/)    : {total_images}")
-    print(f"Usable samples (intersection): {kept}")
+    print(f"Dataset root     : {dataset_dir}")
+    print(f"Splits JSON      : {splits_path}")
+    print(f"Output root      : {out_base}")
+    print(f"Present modalities: {present_modalities}（輸出時 yolo_labels -> labels）")
     print(f"  -> train: {len(train_stems)}")
     print(f"  -> val  : {len(val_stems)}")
-    print(f"  -> test : {len(test_stems)}")
+    print(f"  -> test : {len(test_stems)} (Copied from val)")
     print(f"[OK] 已產生 {out_base / 'data.yaml'}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Split dataset into train/val/test with multiple modalities and emit Ultralytics data.yaml")
+    parser = argparse.ArgumentParser(description="Split dataset using a JSON file and emit Ultralytics data.yaml")
     parser.add_argument("--dataset", required=True, help="Root directory of the dataset, e.g., dataset/xray_IHDI_5")
+    parser.add_argument("--splits", required=True, help="Path to the dataset_splits.json file")
     parser.add_argument("--out", default="data", help="Output root directory (default: data)")
-    parser.add_argument("--train", type=float, default=0.8, help="Train split ratio (default: 0.8)")
-    parser.add_argument("--val", type=float, default=0.1, help="Validation split ratio (default: 0.1)")
-    parser.add_argument("--test", type=float, default=0.1, help="Test split ratio (default: 0.1)")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    parser.add_argument("--overwrite", action="store_true", help="If set, removes the existing output directory before splitting")
     args = parser.parse_args()
 
     main(
         dataset=args.dataset,
+        splits_file=args.splits,
         out=args.out,
-        train_ratio=args.train,
-        val_ratio=args.val,
-        test_ratio=args.test,
-        seed=args.seed,
+        overwrite=args.overwrite
     )
-
-# python split.py --dataset dataset/xray_IHDI_2_clean --out data --train 0.8 --val 0.1 --test 0.1 --seed 42
+    
+"""
+python split_from_json.py \
+--dataset dataset/mtddh_xray_2d \
+--splits dataset/mtddh_xray_2d/dataset_splits.json \
+--out data \
+--overwrite
+"""

@@ -90,6 +90,12 @@ def main():
         print("請確認 mtddh_xray_2d 資料夾是否已存在且包含 data 子資料夾。")
         return
 
+    # 生成 classes.txt 在 yolo_labels 資料夾中
+    classes_path = os.path.join(DIR_YOLO, 'classes.txt')
+    with open(classes_path, 'w', encoding='utf-8') as f_cls:
+        f_cls.write("LeftHip\nRightHip\n")
+    print(f"已生成類別檔: {classes_path}")
+    
     # 搜尋所有 txt 檔案
     txt_files = glob.glob(os.path.join(INPUT_FOLDER, '*.txt'))
     print(f"找到 {len(txt_files)} 筆資料，目標路徑：{BASE_DIR}/...")
