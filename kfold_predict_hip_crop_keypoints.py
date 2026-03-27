@@ -251,7 +251,7 @@ def main():
     )
 
     # ---- 5) Over-all confusion matrix（左/右/合併）----
-    all_folds_cls_metrics = compute_and_save_confusion_matrices_with_metrics(
+    compute_and_save_confusion_matrices_with_metrics(
         left_preds=all_left_pred,
         left_gts=all_left_gt,
         right_preds=all_right_pred,
@@ -274,7 +274,7 @@ if __name__ == "__main__":
 """
 python kfold_predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
+  --kp_left_tpl "results_成大資料集2訓練/results_kfold_成大資料集/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
   --yolo_weights weights/yolo26s_kfold_xray_IHDI_fold{fold}.pt \
   --data_root data \
   --k 5 \

@@ -612,6 +612,11 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     x = np.array(gt_list)
     y = np.array(pred_list)
 
+    # 如果資料點不足，直接回傳預設值並跳過繪圖
+    if len(x) <= 1:
+        prefix = side.lower()
+        return {f"r_{prefix}": 0, f"r2_{prefix}": 0, f"icc_{prefix}": 0}
+
     # 回歸線 y = ax + b
     a, b = np.polyfit(x, y, 1)
     x_line = np.linspace(x.min(), x.max(), 100)
@@ -623,20 +628,15 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     kendalltau_corr, _ = kendalltau(x, y)
     r2 = r2_score(x, y)
     
-    # ---- 新增: 呼叫 ICC 計算 ----
+    # 計算 ICC
     icc_val = calculate_icc(x, y)
 
     # 繪圖
     plt.figure(figsize=(6, 6))
     plt.scatter(x, y, c='blue', alpha=0.6, label='Predicted vs. GT')
-
-    # 畫理想線
     plt.plot([x.min(), x.max()], [x.min(), x.max()], 'g--', label='Ideal (y=x)')
-
-    # 畫回歸線
     plt.plot(x_line, y_line, 'r--', label=f'Reg: y={a:.2f}x+{b:.2f}')
 
-    # 更新標題，加入 ICC
     plt.title(
         f"{side} AI Angle Prediction\n"
         f"R={pearsonr_corr:.2f}, ICC={icc_val:.2f}, R²={r2:.2f}\n"
@@ -654,10 +654,20 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     else:
         plt.show()
 
+    # 將 side 轉為小寫當作 key (例如: 'Left' -> 'left', 'All' -> 'all')
+    prefix = side.lower()
+    return {
+        f"r_{prefix}": pearsonr_corr,
+        f"r2_{prefix}": r2,
+        f"icc_{prefix}": icc_val
+    }
+
 def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
-    # 確保是 np.array
     x = np.array(pixel_errors)
     y = np.array(ai_errors_avg)
+
+    if len(x) <= 1:
+        return {"r_pixel": 0, "r2_pixel": 0}
 
     # 計算統計指標
     r, _ = pearsonr(x, y)
@@ -685,6 +695,12 @@ def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
         plt.close()
     else:
         plt.show()
+
+    # 回傳指定指標
+    return {
+        "r_pixel": r,
+        "r2_pixel": r2
+    }
 
 def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir, fold_index=None, using_gt_box=False, model_points=None):
     
@@ -980,15 +996,15 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     ai_pred_all = np.concatenate([ai_left_pred_list, ai_right_pred_list])
 
     if len(ai_left_gt_list) > 1:
-        plot_ai_angle_scatter(ai_left_gt_list, ai_left_pred_list, 'Left', os.path.join(result_dir, "scatter_ai_left.png"))
-        plot_ai_angle_scatter(ai_right_gt_list, ai_right_pred_list, 'Right', os.path.join(result_dir, "scatter_ai_right.png"))
-    plot_ai_angle_scatter(ai_gt_all, ai_pred_all, "Overall", os.path.join(result_dir, "scatter_ai_all.png"))
+        ai_left_metrics = plot_ai_angle_scatter(ai_left_gt_list, ai_left_pred_list, 'Left', os.path.join(result_dir, "scatter_ai_left.png"))
+        ai_right_metrics = plot_ai_angle_scatter(ai_right_gt_list, ai_right_pred_list, 'Right', os.path.join(result_dir, "scatter_ai_right.png"))
+    ai_all_metrics = plot_ai_angle_scatter(ai_gt_all, ai_pred_all, 'All', os.path.join(result_dir, "scatter_ai_all.png"))
     
     # -------------------------------------------------------------
     # 5-5. Pixel vs. Angle Error Scatter Plot
     # -------------------------------------------------------------
     ai_errors_avg = [(l + r) / 2 for l, r in zip(ai_errors_left, ai_errors_right)]
-    plot_pixel_vs_angle_error(all_avg_distances, ai_errors_avg, os.path.join(result_dir, "scatter_pix_vs_angle.png"))
+    pixel_vs_angle_metrics = plot_pixel_vs_angle_error(all_avg_distances, ai_errors_avg, os.path.join(result_dir, "scatter_pix_vs_angle.png"))
     
     # ------------------------------------------------------------- Outliers Saving -------------------------------------------------------------
     with open(os.path.join(result_dir, "outliers_pixel.txt"), "w") as f: f.write("\n".join(pixel_outlier_records))
@@ -997,21 +1013,6 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     with open(os.path.join(result_dir, "outlier_files.txt"), "w") as f: f.write("\n".join(all_outlier_files))
     
     # ------------------------------------------------------------- Final Metrics Calculation -------------------------------------------------------------
-    r_left, _ = pearsonr(ai_left_gt_list, ai_left_pred_list) if len(ai_left_gt_list) > 1 else (0,0)
-    r2_left = r2_score(ai_left_gt_list, ai_left_pred_list) if len(ai_left_gt_list) > 1 else 0
-    icc_left = calculate_icc(ai_left_gt_list, ai_left_pred_list) # 新增
-
-    r_right, _ = pearsonr(ai_right_gt_list, ai_right_pred_list) if len(ai_right_gt_list) > 1 else (0,0)
-    r2_right = r2_score(ai_right_gt_list, ai_right_pred_list) if len(ai_right_gt_list) > 1 else 0
-    icc_right = calculate_icc(ai_right_gt_list, ai_right_pred_list) # 新增
-
-    r_all, _ = pearsonr(ai_gt_all, ai_pred_all) if len(ai_gt_all) > 1 else (0,0)
-    r2_all = r2_score(ai_gt_all, ai_pred_all) if len(ai_gt_all) > 1 else 0
-    icc_all = calculate_icc(ai_gt_all, ai_pred_all) # 新增
-
-    r_pixel, _ = pearsonr(all_avg_distances, ai_errors_avg) if len(all_avg_distances) > 1 else (0,0)
-    r2_pixel = r2_score(all_avg_distances, ai_errors_avg) if len(all_avg_distances) > 1 else 0
-
     avg_error_left = float(np.mean(ai_errors_left))
     avg_error_right = float(np.mean(ai_errors_right))
     mu_ai_err = float(np.mean(ai_errors_left + ai_errors_right))
@@ -1042,25 +1043,13 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         "std_ai_error": std_ai_err,
         "avg_ai_error_left": avg_error_left,
         "avg_ai_error_right": avg_error_right,
-
-        "r_left": r_left,
-        "r2_left": r2_left,
-        "icc_left": icc_left,   
-
-        "r_right": r_right,
-        "r2_right": r2_right,
-        "icc_right": icc_right, 
-
-        "r_all": r_all,
-        "r2_all": r2_all,
-        "icc_all": icc_all,     
-
-        "r_pixel": r_pixel,
-        "r2_pixel": r2_pixel,
     }
     
     # 直接將 cls_metrics 裡所有的分類與篩檢指標無縫合併進來
     metrics.update(cls_metrics)
+    metrics.update(ai_left_metrics)
+    metrics.update(ai_right_metrics)
+    metrics.update(ai_all_metrics)
     return metrics
 
 if __name__ == "__main__":
