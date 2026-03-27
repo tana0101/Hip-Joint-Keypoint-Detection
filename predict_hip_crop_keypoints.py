@@ -7,9 +7,10 @@ import numpy as np
 import pandas as pd
 import json
 import re
+import csv
+import seaborn as sns
 from sklearn.metrics import (
     confusion_matrix,
-    ConfusionMatrixDisplay,
     accuracy_score,
     precision_recall_fscore_support,
     r2_score,
@@ -464,8 +465,15 @@ def draw_comparison_figure(
     plt.close()
 
 def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right_preds, right_gts, save_dir):
+    # 確保儲存目錄存在
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 4 分類設定
     label_map = {'I': 0, 'II': 1, 'III': 2, 'IV': 3}
-    labels = ['I', 'II', 'III', 'IV']
+    labels_4class = ['I', 'II', 'III', 'IV']
+    
+    # 二元分類設定 (0: 正常 Grade I, 1: 異常 Grade II-IV)
+    labels_2class = ['Normal (I)', 'Abnormal (II-IV)']
     
     data_groups = {
         'left': (left_preds, left_gts, 'Left IHDI', 'Blues'),
@@ -476,47 +484,127 @@ def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right
     results = {}
 
     for name, (preds, gts, title, cmap) in data_groups.items():
+        # 篩選有效的標籤對
         valid_pairs = [(p, g) for p, g in zip(preds, gts) if p in label_map and g in label_map]
         
         if not valid_pairs:
             print(f"Warning: No valid labels found for group {name}. Skipping...")
             continue
             
-        v_preds, v_gts = zip(*valid_pairs) # 拆解回預測與真值
+        v_preds, v_gts = zip(*valid_pairs) 
         
-        # 轉換成數值序列用於相關性計算
+        # ==========================================
+        # 階段一：4 分類 (分級評估 Grading)
+        # ==========================================
         preds_numeric = [label_map[p] for p in v_preds]
         gts_numeric = [label_map[g] for g in v_gts]
 
-        # --- 計算新增指標 ---
-        # Weighted Kappa (Quadratic 常用於醫學等級)
-        wk = cohen_kappa_score(v_gts, v_preds, labels=labels, weights='quadratic')
-        
-        # Kendall's Tau
+        # 計算等級相關性指標
+        wk = cohen_kappa_score(gts_numeric, preds_numeric, weights='quadratic')
         kt, _ = kendalltau(gts_numeric, preds_numeric)
         
-        # 原有指標
-        acc = accuracy_score(v_gts, v_preds)
-        p, r, f1, _ = precision_recall_fscore_support(v_gts, v_preds, labels=labels, average='weighted', zero_division=0)
+        # 計算 4 分類基礎指標 (改用 macro)
+        acc_4 = accuracy_score(v_gts, v_preds)
+        p_mac, r_mac, f1_mac, _ = precision_recall_fscore_support(v_gts, v_preds, labels=labels_4class, average='macro', zero_division=0)
         
-        results[f'acc_{name}'] = acc
-        results[f'prec_{name}'] = p
-        results[f'rec_{name}'] = r
-        results[f'f1_{name}'] = f1
-        results[f'weighted_kappa_{name}'] = wk
-        results[f'kendall_tau_{name}'] = kt
+        # 取得各類別獨立的 F1-score
+        _, _, f1_per_class, _ = precision_recall_fscore_support(v_gts, v_preds, labels=labels_4class, average=None, zero_division=0)
 
-        # --- 繪圖 (增加指標顯示) ---
-        cm = confusion_matrix(v_gts, v_preds, labels=labels)
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
+        # 寫入 4 分類 results
+        results[f'4cls_Acc_{name}'] = acc_4
+        results[f'4cls_Precision_{name}'] = p_mac
+        results[f'4cls_Recall_{name}'] = r_mac
+        results[f'4cls_Macro_F1_{name}'] = f1_mac
+        results[f'4cls_QWK_{name}'] = wk
+        results[f'4cls_Kendall_{name}'] = kt
+        for i, lbl in enumerate(labels_4class):
+            results[f'4cls_F1_Grade_{lbl}_{name}'] = f1_per_class[i]
+
+        # 繪製 4x4 混淆矩陣
+        cm_4 = confusion_matrix(v_gts, v_preds, labels=labels_4class)
+        cm_norm_4 = confusion_matrix(v_gts, v_preds, labels=labels_4class, normalize='true')
         
-        fig, ax = plt.subplots(figsize=(6, 5))
-        disp.plot(ax=ax, cmap=cmap)
-        # 標題加入 WK 與 KT
-        ax.set_title(f'{title}\nAcc: {acc:.2%} | F1: {f1:.2%}\nWK(Quad): {wk:.3f} | Kendall: {kt:.3f}')
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        fig.suptitle(f'{title} (4-Class)\nAcc: {acc_4:.2%} | Macro F1: {f1_mac:.2%} | QWK: {wk:.3f} | Kendall: {kt:.3f}', fontsize=14)
+        
+        sns.heatmap(cm_4, annot=True, fmt='d', cmap=cmap, ax=axes[0], xticklabels=labels_4class, yticklabels=labels_4class)
+        axes[0].set_title('Counts')
+        axes[0].set_xlabel('Predicted')
+        axes[0].set_ylabel('Ground Truth')
+        
+        sns.heatmap(cm_norm_4, annot=True, fmt='.2f', cmap=cmap, ax=axes[1], xticklabels=labels_4class, yticklabels=labels_4class, vmin=0, vmax=1)
+        axes[1].set_title('Normalized (by True Label)')
+        axes[1].set_xlabel('Predicted')
+        axes[1].set_ylabel('Ground Truth')
+        
         plt.tight_layout()
-        fig.savefig(os.path.join(save_dir, f"confusion_matrix_{name}.png"))
+        fig.savefig(os.path.join(save_dir, f"CM_4Class_{name}.png"), dpi=300)
         plt.close(fig)
+
+        # ==========================================
+        # 階段二：二元分類 (篩檢評估 Screening, I vs II-IV)
+        # ==========================================
+        # 轉換標籤：I -> 0 (陰性), II,III,IV -> 1 (陽性)
+        bin_gts = [0 if g == 'I' else 1 for g in v_gts]
+        bin_preds = [0 if p == 'I' else 1 for p in v_preds]
+        
+        # 取得 TP, TN, FP, FN
+        tn, fp, fn, tp = confusion_matrix(bin_gts, bin_preds, labels=[0, 1]).ravel()
+
+        # 計算基礎醫學指標
+        sens = tp / (tp + fn) if (tp + fn) > 0 else 0.0  # Sensitivity (Recall)
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0  # Specificity
+        acc_bin = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0.0
+
+        # --- 建議新增的進階臨床指標 ---
+        ppv = tp / (tp + fp) if (tp + fp) > 0 else 0.0   # PPV (Precision)
+        npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0   # NPV
+        f1_bin = 2 * (ppv * sens) / (ppv + sens) if (ppv + sens) > 0 else 0.0 # Binary F1
+
+        # 寫入二元分類 results
+        results[f'2cls_Acc_{name}'] = acc_bin
+        results[f'2cls_Sensitivity_{name}'] = sens
+        results[f'2cls_Specificity_{name}'] = spec
+        results[f'2cls_PPV_{name}'] = ppv
+        results[f'2cls_NPV_{name}'] = npv
+        results[f'2cls_F1_{name}'] = f1_bin
+
+        # 繪製 2x2 混淆矩陣
+        cm_2 = confusion_matrix(bin_gts, bin_preds, labels=[0, 1])
+        cm_norm_2 = confusion_matrix(bin_gts, bin_preds, labels=[0, 1], normalize='true')
+        
+        fig2, axes2 = plt.subplots(1, 2, figsize=(10, 4.5))
+        fig2.suptitle(f'{title} (Screening: I vs II-IV)\nAcc: {acc_bin:.2%} | Sens: {sens:.2%} | Spec: {spec:.2%}', fontsize=14)
+        
+        # 為了區分，二元分類改用熱力圖顏色稍微不同的色系 (加一點透明度或選用不同 colormap，這裡沿用但標籤不同)
+        sns.heatmap(cm_2, annot=True, fmt='d', cmap='Oranges', ax=axes2[0], xticklabels=labels_2class, yticklabels=labels_2class)
+        axes2[0].set_title('Counts')
+        axes2[0].set_xlabel('Predicted')
+        axes2[0].set_ylabel('Ground Truth')
+        
+        sns.heatmap(cm_norm_2, annot=True, fmt='.2f', cmap='Oranges', ax=axes2[1], xticklabels=labels_2class, yticklabels=labels_2class, vmin=0, vmax=1)
+        axes2[1].set_title('Normalized (by True Label)')
+        axes2[1].set_xlabel('Predicted')
+        axes2[1].set_ylabel('Ground Truth')
+        
+        plt.tight_layout()
+        fig2.savefig(os.path.join(save_dir, f"CM_2Class_{name}.png"), dpi=300)
+        plt.close(fig2)
+
+    # ==========================================
+    # 階段三：輸出所有指標到 CSV 檔案
+    # ==========================================
+    csv_file_path = os.path.join(save_dir, 'evaluation_metrics_comprehensive.csv')
+    try:
+        with open(csv_file_path, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Metric Name', 'Value'])
+            for key, value in results.items():
+                formatted_value = f"{value:.4f}" if isinstance(value, float) else value
+                writer.writerow([key, formatted_value])
+        print(f"Metrics successfully saved to: {csv_file_path}")
+    except Exception as e:
+        print(f"Failed to save metrics to CSV: {e}")
 
     return results
 
@@ -929,7 +1017,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     mu_ai_err = float(np.mean(ai_errors_left + ai_errors_right))
     std_ai_err = float(np.std(ai_errors_left + ai_errors_right, ddof=1))
 
-    print(f"Done. Avg Dist: {mu_dist:.2f} ± {std_dist:.2f}, AI Err: {mu_ai_err:.2f} ± {std_ai_err:.2f}, IHDI Acc: {cls_metrics['acc_all']:.2%}, R_all: {r_all:.2f}, ICC_all: {icc_all:.2f}")
+    print(f"Done. Avg Dist: {mu_dist:.2f} ± {std_dist:.2f}, AI Err: {mu_ai_err:.2f} ± {std_ai_err:.2f}, IHDI_4cls_Acc_All: {cls_metrics['4cls_Acc_all']:.2%}")
 
     metrics = {
         "exp_name": exp_name,
@@ -955,29 +1043,6 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         "avg_ai_error_left": avg_error_left,
         "avg_ai_error_right": avg_error_right,
 
-        # --- Accuracy, Precision, Recall, F1, Weighted Kappa, Kendall's Tau for Left, Right, and All ---
-        "acc_left": cls_metrics['acc_left'],
-        "prec_left": cls_metrics['prec_left'],
-        "rec_left": cls_metrics['rec_left'],
-        "f1_left": cls_metrics['f1_left'],
-        "weighted_kappa_left": cls_metrics['weighted_kappa_left'],
-        "kendall_tau_left": cls_metrics['kendall_tau_left'],
-
-        "acc_right": cls_metrics['acc_right'],
-        "prec_right": cls_metrics['prec_right'],
-        "rec_right": cls_metrics['rec_right'],
-        "f1_right": cls_metrics['f1_right'],
-        "weighted_kappa_right": cls_metrics['weighted_kappa_right'],
-        "kendall_tau_right": cls_metrics['kendall_tau_right'],
-
-        "acc_all": cls_metrics['acc_all'],
-        "prec_all": cls_metrics['prec_all'],
-        "rec_all": cls_metrics['rec_all'],
-        "f1_all": cls_metrics['f1_all'],
-        "weighted_kappa_all": cls_metrics['weighted_kappa_all'],
-        "kendall_tau_all": cls_metrics['kendall_tau_all'],
-        # -----------------------------------------------------
-
         "r_left": r_left,
         "r2_left": r2_left,
         "icc_left": icc_left,   
@@ -993,6 +1058,9 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         "r_pixel": r_pixel,
         "r2_pixel": r2_pixel,
     }
+    
+    # 直接將 cls_metrics 裡所有的分類與篩檢指標無縫合併進來
+    metrics.update(cls_metrics)
     return metrics
 
 if __name__ == "__main__":
@@ -1025,9 +1093,9 @@ if __name__ == "__main__":
 """
 python predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_path weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold5_best.pth \
-  --yolo_weights weights/yolo26s_kfold_xray_IHDI_fold5.pt \
-  --data "dataset/mtddh_xray_2d" \
-  --output_dir "results_fold5_ema_ce0.05" \
-  --model_points 12
+  --kp_left_path weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_best.pth \
+  --yolo_weights weights/yolo26s_mtddh_set.pt \
+  --data "data/test" \
+  --output_dir "results_mtddh_set" \
+  --model_points 8
 """

@@ -487,4 +487,4 @@ if __name__ == "__main__":
     train(args.data_dir, args.model_name, args.input_size, args.epochs, args.learning_rate,
          args.batch_size, args.side, args.mirror, head_type=args.head_type, split_ratio=args.split_ratio, sigma=args.sigma)
 
-    # python3 train_hip_crop_keypoints.py --data_dir data --model_name convnext_small_mg1234 --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 32 --side left --mirror --head_type simcc_2d --split_ratio 2.0 --sigma 2.0
+    # python3 train_hip_crop_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name convnext_tiny_fpn1234concat --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 64 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
