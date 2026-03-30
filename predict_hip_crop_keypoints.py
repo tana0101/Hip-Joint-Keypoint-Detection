@@ -16,7 +16,7 @@ from sklearn.metrics import (
     r2_score,
     cohen_kappa_score
 )
-from scipy.stats import pearsonr, spearmanr, kendalltau
+from scipy.stats import pearsonr, spearmanr, kendalltau, ttest_rel, mannwhitneyu, wilcoxon
 from ultralytics import YOLO
 
 from datasets.hip_crop_keypoints import DATASET_CONFIGS_BY_COUNT # 鏡像重排
@@ -615,14 +615,15 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     # 如果資料點不足，直接回傳預設值並跳過繪圖
     if len(x) <= 1:
         prefix = side.lower()
-        return {f"r_{prefix}": 0, f"r2_{prefix}": 0, f"icc_{prefix}": 0}
+        return {f"r_{prefix}": 0, f"r2_{prefix}": 0, f"icc_{prefix}": 0, 
+                f"t_pval_{prefix}": 1.0, f"mw_pval_{prefix}": 1.0}
 
     # 回歸線 y = ax + b
     a, b = np.polyfit(x, y, 1)
     x_line = np.linspace(x.min(), x.max(), 100)
     y_line = a * x_line + b
 
-    # 評估指標
+    # 評估相關性指標
     pearsonr_corr, _ = pearsonr(x, y)
     spearmanr_corr, _ = spearmanr(x, y)
     kendalltau_corr, _ = kendalltau(x, y)
@@ -631,16 +632,33 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     # 計算 ICC
     icc_val = calculate_icc(x, y)
 
+    # ==========================================
+    # 新增的差異性統計檢定
+    # ==========================================
+    # 1. Paired Student's t-Test (成對 t 檢定)
+    t_stat, t_pval = ttest_rel(x, y)
+
+    # 2. Mann-Whitney U test (獨立樣本非參數檢定 - 依照您的需求加入)
+    u_stat, mw_pval = mannwhitneyu(x, y)
+
+    # 3. Wilcoxon Signed-Rank test (成對樣本非參數檢定 - 統計學上更推薦)
+    # 加上 try-except 是為了防止 GT 和 Pred 完全一模一樣時 (差值全為0) 導致 ValueError
+    try:
+        w_stat, w_pval = wilcoxon(x, y)
+    except ValueError:
+        w_pval = 1.0 
+
     # 繪圖
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(7, 7))
     plt.scatter(x, y, c='blue', alpha=0.6, label='Predicted vs. GT')
     plt.plot([x.min(), x.max()], [x.min(), x.max()], 'g--', label='Ideal (y=x)')
     plt.plot(x_line, y_line, 'r--', label=f'Reg: y={a:.2f}x+{b:.2f}')
 
+    # 更新 Title，加入 p-value 資訊 (使用 P-val 表示)
     plt.title(
         f"{side} AI Angle Prediction\n"
         f"R={pearsonr_corr:.2f}, ICC={icc_val:.2f}, R²={r2:.2f}\n"
-        f"(Spearman={spearmanr_corr:.2f}, Kendall={kendalltau_corr:.2f})"
+        f"Paired t-Test p={t_pval:.3f}, Mann-Whitney p={mw_pval:.3f}, Wilcoxon p={w_pval:.3f}"
     )
     plt.xlabel("Ground Truth AI Angle (°)")
     plt.ylabel("Predicted AI Angle (°)")
@@ -659,7 +677,10 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     return {
         f"r_{prefix}": pearsonr_corr,
         f"r2_{prefix}": r2,
-        f"icc_{prefix}": icc_val
+        f"icc_{prefix}": icc_val,
+        f"t_pval_{prefix}": t_pval,      # 紀錄 Paired t-test p-value
+        f"mw_pval_{prefix}": mw_pval,    # 紀錄 Mann-Whitney p-value
+        f"wilcoxon_pval_{prefix}": w_pval # 紀錄 Wilcoxon p-value
     }
 
 def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
@@ -995,9 +1016,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     ai_gt_all = np.concatenate([ai_left_gt_list, ai_right_gt_list])
     ai_pred_all = np.concatenate([ai_left_pred_list, ai_right_pred_list])
 
-    if len(ai_left_gt_list) > 1:
-        ai_left_metrics = plot_ai_angle_scatter(ai_left_gt_list, ai_left_pred_list, 'Left', os.path.join(result_dir, "scatter_ai_left.png"))
-        ai_right_metrics = plot_ai_angle_scatter(ai_right_gt_list, ai_right_pred_list, 'Right', os.path.join(result_dir, "scatter_ai_right.png"))
+    ai_left_metrics = plot_ai_angle_scatter(ai_left_gt_list, ai_left_pred_list, 'Left', os.path.join(result_dir, "scatter_ai_left.png"))
+    ai_right_metrics = plot_ai_angle_scatter(ai_right_gt_list, ai_right_pred_list, 'Right', os.path.join(result_dir, "scatter_ai_right.png"))
     ai_all_metrics = plot_ai_angle_scatter(ai_gt_all, ai_pred_all, 'All', os.path.join(result_dir, "scatter_ai_all.png"))
     
     # -------------------------------------------------------------
@@ -1050,6 +1070,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     metrics.update(ai_left_metrics)
     metrics.update(ai_right_metrics)
     metrics.update(ai_all_metrics)
+    metrics.update(pixel_vs_angle_metrics)
     return metrics
 
 if __name__ == "__main__":
