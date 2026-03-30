@@ -36,6 +36,7 @@ from utils.hip_geometry import (
     project_to_metric6
 )
 from utils.plots import add_sigma_guides, add_zscore_right_axis
+from collections import OrderedDict
 
 YOLO_LEFT_CLS  = 0
 YOLO_RIGHT_CLS = 1
@@ -608,6 +609,107 @@ def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right
 
     return results
 
+def plot_avg_distances(image_labels, all_avg_distances, result_dir, tick_step=50):
+    """
+    繪製每張影像的平均距離長條圖。
+    """
+    # 建立 X 軸座標索引與刻度
+    indices = np.arange(len(image_labels))
+    target_ticks = indices[::tick_step]
+    target_labels = [str(image_labels[i]) for i in target_ticks]
+
+    fig, ax = plt.subplots(figsize=(16, 6))
+    
+    # 畫長條圖
+    ax.bar(indices, all_avg_distances, label='Avg Distance per Image')
+    
+    # 計算 μ, σ
+    mu_dist = float(np.mean(all_avg_distances))
+    std_dist = float(np.std(all_avg_distances, ddof=1))
+    
+    # 參考線
+    add_sigma_guides(ax, mu=mu_dist, std=std_dist, 
+                     mu_label=f'Overall Avg Dist(μ): {mu_dist:.2f}', 
+                     label=f'μ ± 1σ (σ={std_dist:.2f})')
+    add_zscore_right_axis(ax, mu=mu_dist, std=std_dist)
+    
+    # 設定圖表標題與軸標籤
+    ax.set_xlabel('Image Index')
+    ax.set_ylabel('Avg Distance')
+    ax.set_title(f"Average Distance per Image (mu={mu_dist:.2f}, sigma={std_dist:.2f})")
+    
+    # 套用間隔設定
+    ax.set_xticks(target_ticks)
+    ax.set_xticklabels(target_labels, rotation=0, fontsize=10)
+    
+    # 處理圖例 (Legend) 去除重複項目
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = OrderedDict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
+    
+    # 儲存與關閉
+    save_path = os.path.join(result_dir, "avg_dists.png")
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+    
+    return mu_dist, std_dist
+
+
+def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_dir, tick_step=50):
+    """
+    繪製每張影像的 AI 角度誤差長條圖 (左右腳)。
+    """
+    # 建立 X 軸座標索引與刻度
+    indices = np.arange(len(image_labels))
+    target_ticks = indices[::tick_step]
+    target_labels = [str(image_labels[i]) for i in target_ticks]
+
+    fig, ax = plt.subplots(figsize=(16, 6))
+    
+    bar_width = 0.4
+    # 分開畫左右腳，並偏移 X 軸位置避免重疊
+    ax.bar(indices - bar_width/2, ai_errors_left,  width=bar_width, label='Left AI Error', color='magenta')
+    ax.bar(indices + bar_width/2, ai_errors_right, width=bar_width, label='Right AI Error', color='crimson')
+
+    # 左右腳各自的平均統計線
+    avg_error_left  = float(np.mean(ai_errors_left))
+    avg_error_right = float(np.mean(ai_errors_right))
+    ax.axhline(avg_error_left,  linestyle='--', label=f'Avg Left Error: {avg_error_left:.2f}°', color='magenta')
+    ax.axhline(avg_error_right, linestyle='--', label=f'Avg Right Error: {avg_error_right:.2f}°', color='crimson')
+
+    # 計算整體的 μ, σ
+    combined_errors = np.concatenate([np.asarray(ai_errors_left), np.asarray(ai_errors_right)], axis=0)
+    mu_err  = float(np.mean(combined_errors))
+    std_err = float(np.std(combined_errors, ddof=1))
+
+    # 參考線
+    add_sigma_guides(ax, mu=mu_err, std=std_err, 
+                     mu_label=f'Overall AI Error(μ): {mu_err:.2f}°', 
+                     label=f'μ ± 1σ (σ={std_err:.2f})', 
+                     mu_color='blue', color='red')
+    add_zscore_right_axis(ax, mu=mu_err, std=std_err)
+
+    # 設定圖表標題與軸標籤
+    ax.set_xlabel('Image Index')
+    ax.set_ylabel('AI Angle Error (°)')
+    ax.set_title(f'AI Angle Errors per Image (mu={mu_err:.2f}°)')
+    
+    # 套用間隔設定
+    ax.set_xticks(target_ticks)
+    ax.set_xticklabels(target_labels, rotation=0, fontsize=10) 
+
+    # 處理圖例 (Legend) 去除重複項目
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = OrderedDict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
+
+    # 儲存與關閉
+    save_path = os.path.join(result_dir, "AI_angle_errors.png")
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+    
+    return avg_error_left, avg_error_right, mu_err, std_err
+    
 def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     x = np.array(gt_list)
     y = np.array(pred_list)
@@ -910,96 +1012,24 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             all_outlier_files.append(os.path.splitext(fname)[0])
 
     # -------------------------------------------------------------- Plotting the average distances and AI angle errors --------------------------------------------------------------
-    # 5. 統計與繪圖
+    tick_step_val = 50
 
-    # 設定 X 軸刻度顯示間隔
-    tick_step = 50
-    # 建立 X 軸座標索引
-    indices = np.arange(len(image_labels))
+    # 1. 繪製平均距離圖
+    mu_dist, std_dist = plot_avg_distances(
+        image_labels=image_labels,
+        all_avg_distances=all_avg_distances,
+        result_dir=result_dir,
+        tick_step=tick_step_val
+    )
     
-    # 準備要顯示的刻度位置與標籤
-    # 每隔 tick_step 取一個值
-    target_ticks = indices[::tick_step]
-    
-    # 對應的 Labels (轉換為 list 確保相容性)
-    target_labels = [str(image_labels[i]) for i in target_ticks]
-
-    # -------------------------------------------------------------
-    # 5-1. Avg Distance Plot
-    # -------------------------------------------------------------
-    fig, ax = plt.subplots(figsize=(16, 6))
-    
-    # [修改] 改用 indices 畫圖，確保與 tick 控制邏輯一致
-    ax.bar(indices, all_avg_distances, label='Avg Distance per Image')
-    
-    # μ, σ
-    mu_dist = float(np.mean(all_avg_distances))
-    std_dist = float(np.std(all_avg_distances, ddof=1))
-    
-    # 參考線
-    add_sigma_guides(ax, mu=mu_dist, std=std_dist, 
-                     mu_label=f'Overall Avg Dist(μ): {mu_dist:.2f}', 
-                     label=f'μ ± 1σ (σ={std_dist:.2f})')
-    add_zscore_right_axis(ax, mu=mu_dist, std=std_dist)
-    
-    ax.set_xlabel('Image Index')
-    ax.set_ylabel('Avg Distance')
-    ax.set_title(f"Average Distance per Image (mu={mu_dist:.2f}, sigma={std_dist:.2f})")
-    
-    # [修改] 套用間隔設定
-    ax.set_xticks(target_ticks)
-    ax.set_xticklabels(target_labels, rotation=0, fontsize=10) # 間隔變大後，rotation 可以改回 0 度比較好讀
-    
-    # Legend
-    handles, labels = ax.get_legend_handles_labels()
-    from collections import OrderedDict
-    by_label = OrderedDict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys())
-    
-    plt.savefig(os.path.join(result_dir, "avg_dists.png"), bbox_inches='tight')
-    plt.close()
-
-    # -------------------------------------------------------------
-    # 2. AI Angle Error per Image Chart
-    # -------------------------------------------------------------
-    fig, ax = plt.subplots(figsize=(16, 6))
-    
-    bar_width = 0.4
-    ax.bar(indices - bar_width/2, ai_errors_left,  width=bar_width, label='Left AI Error', color='magenta')
-    ax.bar(indices + bar_width/2, ai_errors_right, width=bar_width, label='Right AI Error', color='crimson')
-
-    # 統計線
-    avg_error_left  = float(np.mean(ai_errors_left))
-    avg_error_right = float(np.mean(ai_errors_right))
-    ax.axhline(avg_error_left,  linestyle='--', label=f'Avg Left Error: {avg_error_left:.2f}°', color='magenta')
-    ax.axhline(avg_error_right, linestyle='--', label=f'Avg Right Error: {avg_error_right:.2f}°', color='crimson')
-
-    combined_errors = np.concatenate([np.asarray(ai_errors_left), np.asarray(ai_errors_right)], axis=0)
-    mu_err  = float(np.mean(combined_errors))
-    std_err = float(np.std(combined_errors, ddof=1))
-
-    add_sigma_guides(ax, mu=mu_err, std=std_err, 
-                     mu_label=f'Overall AI Error(μ): {mu_err:.2f}°', 
-                     label=f'μ ± 1σ (σ={std_err:.2f})', 
-                     mu_color='blue', color='red')
-    add_zscore_right_axis(ax, mu=mu_err, std=std_err)
-
-    ax.set_xlabel('Image Index')
-    ax.set_ylabel('AI Angle Error (°)')
-    ax.set_title(f'AI Angle Errors per Image (mu={mu_err:.2f}°)')
-    
-    # [修改] 套用間隔設定 (與上面相同)
-    ax.set_xticks(target_ticks)
-    ax.set_xticklabels(target_labels, rotation=0, fontsize=10) 
-
-    # Legend
-    handles, labels = ax.get_legend_handles_labels()
-    from collections import OrderedDict
-    by_label = OrderedDict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys())
-
-    plt.savefig(os.path.join(result_dir, "AI_angle_errors.png"), bbox_inches='tight')
-    plt.close()
+    # 2. 繪製 AI 角度誤差圖
+    avg_error_left, avg_error_right, mu_ai_err, std_ai_err = plot_ai_angle_errors(
+        image_labels=image_labels,
+        ai_errors_left=ai_errors_left,
+        ai_errors_right=ai_errors_right,
+        result_dir=result_dir,
+        tick_step=tick_step_val
+    )
     
     # -------------------------------------------------------------
     # 5-3. Confusion Matrices
@@ -1033,11 +1063,6 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     with open(os.path.join(result_dir, "outlier_files.txt"), "w") as f: f.write("\n".join(all_outlier_files))
     
     # ------------------------------------------------------------- Final Metrics Calculation -------------------------------------------------------------
-    avg_error_left = float(np.mean(ai_errors_left))
-    avg_error_right = float(np.mean(ai_errors_right))
-    mu_ai_err = float(np.mean(ai_errors_left + ai_errors_right))
-    std_ai_err = float(np.std(ai_errors_left + ai_errors_right, ddof=1))
-
     print(f"Done. Avg Dist: {mu_dist:.2f} ± {std_dist:.2f}, AI Err: {mu_ai_err:.2f} ± {std_ai_err:.2f}, IHDI_4cls_Acc_All: {cls_metrics['4cls_Acc_all']:.2%}")
 
     metrics = {
