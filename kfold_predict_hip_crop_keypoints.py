@@ -9,6 +9,7 @@ from predict_hip_crop_keypoints import (
     compute_and_save_confusion_matrices_with_metrics,
     plot_ai_angle_scatter,
     plot_pixel_vs_angle_error,
+    plot_error_histogram_with_shapiro,
 )
 
 def main():
@@ -249,8 +250,22 @@ def main():
         side="Overall (All folds)",
         save_path=scatter_overall_path,
     )
+    
+    # ---- 5) 
+    signed_errors_left_all = np.asarray(all_ai_left_pred, dtype=float) - np.asarray(all_ai_left_gt, dtype=float)
+    signed_errors_right_all = np.asarray(all_ai_right_pred, dtype=float) - np.asarray(all_ai_right_gt, dtype=float)
+    p_val_shapiro_all = plot_error_histogram_with_shapiro(
+        errors_left=signed_errors_left_all,
+        errors_right=signed_errors_right_all,
+        result_dir=all_folds_summary_dir
+    )
 
-    # ---- 5) Over-all confusion matrix（左/右/合併）----
+    if p_val_shapiro_all > 0.05:
+        print(f"\n[K-fold 總結] 總體誤差符合常態分佈 (p={p_val_shapiro_all:.4f})，使用 Paired t-Test 的結果。")
+    else:
+        print(f"\n[K-fold 總結] 總體誤差不符合常態分佈 (p={p_val_shapiro_all:.4f})，使用 Wilcoxon Signed-Rank Test 的結果。")
+
+    # ---- 6) Over-all confusion matrix（左/右/合併）----
     compute_and_save_confusion_matrices_with_metrics(
         left_preds=all_left_pred,
         left_gts=all_left_gt,
@@ -259,7 +274,7 @@ def main():
         save_dir=all_folds_summary_dir,
     )
 
-    # ---- 6) Pixel vs Angle error (global) ----
+    # ---- 7) Pixel vs Angle error (global) ----
     pixel_vs_angle_path = os.path.join(all_folds_summary_dir, "scatter_pixel_vs_angle_error_all.png")
     plot_pixel_vs_angle_error(
         pixel_errors=all_dist,
@@ -276,6 +291,16 @@ python kfold_predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
   --kp_left_tpl "results_成大資料集2訓練/results_kfold_成大資料集/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
   --yolo_weights weights/yolo26s_kfold_xray_IHDI_fold{fold}.pt \
+  --data_root data \
+  --k 5 \
+  --output_root results_kfold
+"""
+
+"""
+python kfold_predict_hip_crop_keypoints.py \
+  --model_name convnext_tiny_fpn1234concat \
+  --kp_left_tpl "results_mtddh訓練/results_kfold_新版統計資料/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
+  --yolo_weights weights/yolo26s_kfold_mtddh_fold{fold}.pt \
   --data_root data \
   --k 5 \
   --output_root results_kfold

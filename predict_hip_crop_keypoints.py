@@ -16,7 +16,7 @@ from sklearn.metrics import (
     r2_score,
     cohen_kappa_score
 )
-from scipy.stats import pearsonr, spearmanr, kendalltau, ttest_rel, mannwhitneyu, wilcoxon
+from scipy.stats import pearsonr, spearmanr, kendalltau, ttest_rel, mannwhitneyu, wilcoxon, shapiro
 from ultralytics import YOLO
 
 from datasets.hip_crop_keypoints import DATASET_CONFIGS_BY_COUNT # 鏡像重排
@@ -709,7 +709,53 @@ def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_d
     plt.close()
     
     return avg_error_left, avg_error_right, mu_err, std_err
+
+def plot_error_histogram_with_shapiro(errors_left, errors_right, result_dir):
+    """
+    繪製 AI 角度誤差的直方圖 (Histogram)，並執行 Shapiro-Wilk 常態分佈檢定。
+    注意：傳入的 errors 必須是帶正負號的真實誤差 (Pred - GT)。
+    """
+    # 1. 合併左右腳的誤差
+    combined_errors = np.concatenate([np.asarray(errors_left), np.asarray(errors_right)], axis=0)
     
+    # 2. 進行 Shapiro-Wilk 檢定
+    stat, p_shapiro = shapiro(combined_errors)
+    
+    # 3. 計算平均值與標準差
+    mu = float(np.mean(combined_errors))
+    std = float(np.std(combined_errors, ddof=1))
+
+    # 4. 繪製直方圖
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # 使用 bins=30 將誤差分組，alpha 控制透明度
+    counts, bins, patches = ax.hist(combined_errors, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
+    
+    # 畫出平均值的垂直參考線
+    ax.axvline(mu, color='red', linestyle='dashed', linewidth=2, label=f'Mean (μ): {mu:.2f}°')
+    
+    # 5. 設定標題 (動態顯示 Shapiro-Wilk 結果)
+    normality_text = "Normal" if p_shapiro > 0.05 else "Non-Normal"
+    title = (
+        f"AI Angle Error Distribution (Histogram)\n"
+        f"μ = {mu:.2f}°, σ = {std:.2f}°\n"
+        f"Shapiro-Wilk p-value = {p_shapiro:.4f} ({normality_text})"
+    )
+    ax.set_title(title, fontsize=12)
+    ax.set_xlabel('Signed Error (Pred - GT) (°)', fontsize=11)
+    ax.set_ylabel('Frequency (Number of Images)', fontsize=11)
+    
+    ax.legend()
+    plt.grid(axis='y', linestyle='--', alpha=0.6)
+    
+    # 6. 儲存與關閉
+    save_path = os.path.join(result_dir, "error_histogram_shapiro.png")
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+
+    # 回傳 p-value 以供後續流程自動判斷 (要用 t-test 還是 Wilcoxon)
+    return p_shapiro
+
 def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
     x = np.array(gt_list)
     y = np.array(pred_list)
@@ -898,7 +944,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     all_avg_distances = []
     image_labels = []
     
-    ai_errors_left, ai_errors_right = [], []
+    ai_errors_left, ai_errors_right = [], [] # 絕對誤差列表
+    signed_errors_left, signed_errors_right = [], [] # 帶正負號的誤差列表 (Pred - GT)
     ai_left_gt_list, ai_left_pred_list = [], []
     ai_right_gt_list, ai_right_pred_list = [], []
     
@@ -969,8 +1016,13 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         
         ai_left_pred_list.append(ail_p); ai_right_pred_list.append(air_p)
         ai_left_gt_list.append(ail_g);   ai_right_gt_list.append(air_g)
+        
+        # 絕對誤差
         ai_errors_left.append(abs(ail_p - ail_g))
         ai_errors_right.append(abs(air_p - air_g))
+        # 帶正負號的誤差 (Pred - GT)
+        signed_errors_left.append(ail_p - ail_g)
+        signed_errors_right.append(air_p - air_g)
         
         left_preds_all.append(ql_p); right_preds_all.append(qr_p)
         left_gts_all.append(ql_g);   right_gts_all.append(qr_g)
@@ -1031,6 +1083,13 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         tick_step=tick_step_val
     )
     
+    # 3. 繪製誤差分佈直方圖與 Shapiro-Wilk 檢定
+    p_val_shapiro = plot_error_histogram_with_shapiro(
+        errors_left=signed_errors_left,   
+        errors_right=signed_errors_right, 
+        result_dir=result_dir
+    )
+    
     # -------------------------------------------------------------
     # 5-3. Confusion Matrices
     # -------------------------------------------------------------
@@ -1088,6 +1147,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         "std_ai_error": std_ai_err,
         "avg_ai_error_left": avg_error_left,
         "avg_ai_error_right": avg_error_right,
+        
+        "p_val_shapiro": p_val_shapiro
     }
     
     # 直接將 cls_metrics 裡所有的分類與篩檢指標無縫合併進來
