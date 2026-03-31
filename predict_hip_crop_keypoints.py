@@ -660,7 +660,7 @@ def plot_avg_distances(image_labels, all_avg_distances, result_dir, tick_step=50
     return mu_dist, std_dist
 
 
-def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_dir, tick_step=50):
+def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_dir, tick_step=50, bar_width=0.4):
     """
     繪製每張影像的 AI 角度誤差長條圖 (左右腳)。
     """
@@ -670,8 +670,7 @@ def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_d
     target_labels = [str(image_labels[i]) for i in target_ticks]
 
     fig, ax = plt.subplots(figsize=(16, 6))
-    
-    bar_width = 0.4
+
     # 分開畫左右腳，並偏移 X 軸位置避免重疊
     ax.bar(indices - bar_width/2, ai_errors_left,  width=bar_width, label='Left AI Error', color='magenta')
     ax.bar(indices + bar_width/2, ai_errors_right, width=bar_width, label='Right AI Error', color='crimson')
