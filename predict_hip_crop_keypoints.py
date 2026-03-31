@@ -377,7 +377,9 @@ def draw_comparison_figure(
     image, pred_kpts, gt_kpts, ai_pred, ai_gt,
     quadrants_pred, quadrants_gt,
     avg_distance, save_path, image_file,
-    raw_pred=None, raw_gt=None):
+    raw_pred=None, raw_gt=None,
+    label_pred="Predicted", label_gt="Ground Truth"
+):
     """
     建立左右對照圖：左圖使用預測點畫線，右圖使用 ground truth 畫線
 
@@ -402,8 +404,8 @@ def draw_comparison_figure(
     # 第二張 (i=1): 標題顯示 GT 資訊，畫 GT 的幾何線
     # 但「點 (Scatter)」兩張圖都會同時畫，以便對照
     plot_configs = [
-        (pred_kpts, "Predicted Geometry", ai_pred, quadrants_pred),
-        (gt_kpts,   "Ground Truth Geometry", ai_gt, quadrants_gt)
+        (pred_kpts, f"{label_pred} Geometry", ai_pred, quadrants_pred),
+        (gt_kpts,   f"{label_gt} Geometry", ai_gt, quadrants_gt)
     ]
     
     for i, (kpts_lines, title, ai, quadrants) in enumerate(plot_configs):
@@ -416,9 +418,9 @@ def draw_comparison_figure(
         # 同時繪製 GT (紅) 與 Pred (黃) 的點，並加上 Label
         # -------------------------------------------------------
         # 畫 GT 點
-        ax.scatter(r_gt[:, 0], r_gt[:, 1], c='red', s=10, marker='o', label='GT')
+        ax.scatter(r_gt[:, 0], r_gt[:, 1], c='red', s=10, marker='o', label=label_gt)
         # 畫 Pred 點
-        ax.scatter(r_pred[:, 0], r_pred[:, 1], c='yellow', s=10, marker='o', label='Pred')
+        ax.scatter(r_pred[:, 0], r_pred[:, 1], c='yellow', s=10, marker='o', label=label_pred)
         
         # -------------------------------------------------------
         # 幾何線條 (Line) 依據子圖不同而畫 Pred 或 GT
@@ -457,7 +459,7 @@ def draw_comparison_figure(
 
     fig.text(0.5, -0.05, 
              f"Avg Dist: {avg_distance:.2f} px ({avg_dist_percent:.2f}%)    "
-             f"AI Err(L/R): {fmt_err(ai_pred[0], ai_gt[0])} / {fmt_err(ai_pred[1], ai_gt[1])}    "
+             f"AI Diff(L/R): {fmt_err(ai_pred[0], ai_gt[0])} / {fmt_err(ai_pred[1], ai_gt[1])}    "
              f"Quad: {quadrants_gt[0]}({left_match}) / {quadrants_gt[1]}({right_match})", 
              ha='center', fontsize=12, color='blue')
     
@@ -465,7 +467,10 @@ def draw_comparison_figure(
     fig.savefig(os.path.join(save_path, f"{os.path.splitext(image_file)[0]}_compare.png"), bbox_inches='tight')
     plt.close()
 
-def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right_preds, right_gts, save_dir):
+def compute_and_save_confusion_matrices_with_metrics(
+    left_preds, left_gts, right_preds, right_gts, save_dir,
+    label_pred="Predicted", label_gt="Ground Truth"
+):
     # 確保儲存目錄存在
     os.makedirs(save_dir, exist_ok=True)
     
@@ -530,13 +535,13 @@ def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right
         
         sns.heatmap(cm_4, annot=True, fmt='d', cmap=cmap, ax=axes[0], xticklabels=labels_4class, yticklabels=labels_4class)
         axes[0].set_title('Counts')
-        axes[0].set_xlabel('Predicted')
-        axes[0].set_ylabel('Ground Truth')
+        axes[0].set_xlabel(label_pred)
+        axes[0].set_ylabel(label_gt)
         
         sns.heatmap(cm_norm_4, annot=True, fmt='.2f', cmap=cmap, ax=axes[1], xticklabels=labels_4class, yticklabels=labels_4class, vmin=0, vmax=1)
         axes[1].set_title('Normalized (by True Label)')
-        axes[1].set_xlabel('Predicted')
-        axes[1].set_ylabel('Ground Truth')
+        axes[1].set_xlabel(label_pred)
+        axes[1].set_ylabel(label_gt)
         
         plt.tight_layout()
         fig.savefig(os.path.join(save_dir, f"CM_4Class_{name}.png"), dpi=300)
@@ -580,13 +585,13 @@ def compute_and_save_confusion_matrices_with_metrics(left_preds, left_gts, right
         # 為了區分，二元分類改用熱力圖顏色稍微不同的色系 (加一點透明度或選用不同 colormap，這裡沿用但標籤不同)
         sns.heatmap(cm_2, annot=True, fmt='d', cmap='Oranges', ax=axes2[0], xticklabels=labels_2class, yticklabels=labels_2class)
         axes2[0].set_title('Counts')
-        axes2[0].set_xlabel('Predicted')
-        axes2[0].set_ylabel('Ground Truth')
+        axes2[0].set_xlabel(label_pred)
+        axes2[0].set_ylabel(label_gt)
         
         sns.heatmap(cm_norm_2, annot=True, fmt='.2f', cmap='Oranges', ax=axes2[1], xticklabels=labels_2class, yticklabels=labels_2class, vmin=0, vmax=1)
         axes2[1].set_title('Normalized (by True Label)')
-        axes2[1].set_xlabel('Predicted')
-        axes2[1].set_ylabel('Ground Truth')
+        axes2[1].set_xlabel(label_pred)
+        axes2[1].set_ylabel(label_gt)
         
         plt.tight_layout()
         fig2.savefig(os.path.join(save_dir, f"CM_2Class_{name}.png"), dpi=300)
@@ -710,7 +715,10 @@ def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_d
     
     return avg_error_left, avg_error_right, mu_err, std_err
 
-def plot_error_histogram_with_shapiro(errors_left, errors_right, result_dir):
+def plot_error_histogram_with_shapiro(
+    errors_left, errors_right, result_dir,
+    x_label="Signed Error (Pred - GT) (°)"
+):
     """
     繪製 AI 角度誤差的直方圖 (Histogram)，並執行 Shapiro-Wilk 常態分佈檢定。
     注意：傳入的 errors 必須是帶正負號的真實誤差 (Pred - GT)。
@@ -742,7 +750,7 @@ def plot_error_histogram_with_shapiro(errors_left, errors_right, result_dir):
         f"Shapiro-Wilk p-value = {p_shapiro:.4f} ({normality_text})"
     )
     ax.set_title(title, fontsize=12)
-    ax.set_xlabel('Signed Error (Pred - GT) (°)', fontsize=11)
+    ax.set_xlabel(x_label, fontsize=11)
     ax.set_ylabel('Frequency (Number of Images)', fontsize=11)
     
     ax.legend()
@@ -756,7 +764,10 @@ def plot_error_histogram_with_shapiro(errors_left, errors_right, result_dir):
     # 回傳 p-value 以供後續流程自動判斷 (要用 t-test 還是 Wilcoxon)
     return p_shapiro
 
-def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
+def plot_ai_angle_scatter(
+    gt_list, pred_list, side, save_path=None,
+    label_pred="Predicted", label_gt="Ground Truth"
+):
     x = np.array(gt_list)
     y = np.array(pred_list)
 
@@ -798,18 +809,18 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
 
     # 繪圖
     plt.figure(figsize=(7, 7))
-    plt.scatter(x, y, c='blue', alpha=0.6, label='Predicted vs. GT')
+    plt.scatter(x, y, c='blue', alpha=0.6, label=f'{label_pred} vs. {label_gt}')
     plt.plot([x.min(), x.max()], [x.min(), x.max()], 'g--', label='Ideal (y=x)')
     plt.plot(x_line, y_line, 'r--', label=f'Reg: y={a:.2f}x+{b:.2f}')
 
     # 更新 Title，加入 p-value 資訊 (使用 P-val 表示)
     plt.title(
-        f"{side} AI Angle Prediction\n"
+        f"{side} AI Angle Comparison\n"
         f"R={pearsonr_corr:.2f}, ICC={icc_val:.2f}, R²={r2:.2f}\n"
         f"Paired t-Test p={t_pval:.3f}, Mann-Whitney p={mw_pval:.3f}, Wilcoxon p={w_pval:.3f}"
     )
-    plt.xlabel("Ground Truth AI Angle (°)")
-    plt.ylabel("Predicted AI Angle (°)")
+    plt.xlabel(f"{label_gt} AI Angle (°)")
+    plt.ylabel(f"{label_pred} AI Angle (°)")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -831,7 +842,13 @@ def plot_ai_angle_scatter(gt_list, pred_list, side, save_path=None):
         f"wilcoxon_pval_{prefix}": w_pval # 紀錄 Wilcoxon p-value
     }
 
-def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
+def plot_pixel_vs_angle_error(
+    pixel_errors, ai_errors_avg, save_path=None,
+    x_label="Avg Pixel Distance Error",          
+    y_label="Avg AI Angle Error (°)",            
+    title_prefix="Pixel vs. Angle Error",        
+    legend_label="Avg AI Angle Error vs. Pixel Error" 
+):
     x = np.array(pixel_errors)
     y = np.array(ai_errors_avg)
 
@@ -849,12 +866,12 @@ def plot_pixel_vs_angle_error(pixel_errors, ai_errors_avg, save_path=None):
 
     # 繪圖
     plt.figure(figsize=(6, 6))
-    plt.scatter(x, y, color='orange', alpha=0.7, label='Avg AI Angle Error vs. Pixel Error')
+    plt.scatter(x, y, color='orange', alpha=0.7, label=legend_label)
     plt.plot(x_line, y_line, 'r--', label=f'Regression Line: y = {a:.2f}x + {b:.2f}')
 
-    plt.xlabel("Avg Pixel Distance Error")
-    plt.ylabel("Avg AI Angle Error (°)")
-    plt.title(f"Pixel vs. Angle Error\nr = {r:.2f}, R² = {r2:.2f}")
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.title(f"{title_prefix}\nr = {r:.2f}, R² = {r2:.2f}")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
