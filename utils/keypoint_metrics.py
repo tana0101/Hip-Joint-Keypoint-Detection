@@ -1,5 +1,4 @@
 import numpy as np
-from utils.simcc import decode_simcc_to_xy
 
 def calculate_nme(preds, targets, points_count, img_size):
     """

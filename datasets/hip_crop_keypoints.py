@@ -1,7 +1,7 @@
 import os
 import json
 import numpy as np
-import pandas as pd
+
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 
@@ -13,6 +13,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from .augment import ProbAugmentedKeypointDataset
+from utils.csv_parser import parse_csv_get_points
 
 DATASET_CONFIGS_BY_COUNT = {
     12: {
@@ -28,20 +29,6 @@ DATASET_CONFIGS_BY_COUNT = {
 }
 
 SIDE_LABELS = {"left": "LeftHip", "right": "RightHip"}
-
-def parse_csv_get_points(csv_path):
-    """
-    讀取 CSV 並回傳 numpy array，不預設點數，由資料決定
-    """
-    row = pd.read_csv(csv_path, header=None).values.flatten()
-    pts = []
-    for token in row:
-        token = str(token).strip().strip('"').strip("'").strip()
-        token = token.replace("(", "").replace(")", "")
-        if not token: continue # 跳過空值
-        x_str, y_str = token.split(",")
-        pts.append([float(x_str), float(y_str)])
-    return np.array(pts, dtype=np.float32)
 
 def read_detection_for_image(detections_dir: str, img_name: str):
     """

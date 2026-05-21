@@ -3,168 +3,87 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
-# from optim.muon import MuSGD
-
-from torch.utils.data import DataLoader, ConcatDataset
-from torch.utils.tensorboard import SummaryWriter
-import numpy as np
-import matplotlib.pyplot as plt
 import math
 import random
 import copy
+from pathlib import Path
 
-from datasets.transforms import get_hip_base_transform
-from datasets.hip_crop_keypoints import HipCropKeypointDataset, MirroredToSideDataset
-from datasets.augment import ProbAugmentedKeypointDataset
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 單階段使用的資料集和增強版本
+from datasets.full_image_keypoints import FullImageKeypointDataset
+from datasets.augment import FullImageAugmentedDataset
+
+from datasets.transforms import get_full_image_base_transform
+
 from utils.keypoint_metrics import calculate_nme, calculate_pixel_error
 from utils.keypoints import get_preds_and_targets
 from utils.experiment import build_experiment_name
 from utils.train_vis import GraphWrapper, plot_training_progress
-from utils.simcc import (
-    compute_loss_simcc,
-    simcc_label_encoder,
-    simcc_loss_fn,
-)
+from utils.simcc import compute_loss_simcc, simcc_label_encoder, simcc_loss_fn
 from utils.regression import compute_loss_direct_regression
 from utils.ema import ModelEMA
 from models.model import initialize_model
-from pathlib import Path
 
 LOGS_DIR = "logs"
 MODELS_DIR = "weights"
-BBOX_JITTER = True
-BBOX_EXPAND = 0.05
-BBOX_JITTER_PROB = 0.7
-BBOX_JITTER_CENTER = 0.05
-BBOX_JITTER_SCALE = 0.10
 EMA_DECAY = 0.995
 EMA_RAMPUP_STEPS = 500
 EMA_START_DECAY = 0.90
 
-# For reproducibility in DataLoader workers
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-# MUSGD 的參數分組設定
-def get_muon_param_groups(model, lr, weight_decay):
-    # 篩選參數：大於等於 2 維的用 Muon，小於 2 維的 (如 bias) 用純 SGD
-    muon_params = []
-    sgd_params = []
-    
-    for name, p in model.named_parameters():
-        if p.requires_grad:
-            if p.ndim >= 2:  # Conv filters, Linear weights
-                muon_params.append(p)
-            else:            # Biases, LayerNorms, 1D vectors
-                sgd_params.append(p)
-                
-    return [
-        {
-            "params": muon_params, 
-            "use_muon": True,   # 開啟 Muon 混合更新
-            "lr": lr, 
-            "weight_decay": weight_decay
-        },
-        {
-            "params": sgd_params, 
-            "use_muon": False,  # 關閉 Muon，只使用 SGD
-            "lr": lr, 
-            "weight_decay": weight_decay
-        }
-    ]
-
-def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, side, mirror, head_type="direct_regression", split_ratio=2, sigma=6.0, fold_index=None):
+def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, head_type="direct_regression", split_ratio=2, sigma=6.0, fold_index=None):
     
     data_dir = Path(data_dir)
-
+    
     PROJECT_ROOT = Path(__file__).resolve().parents[1]
     if not data_dir.is_absolute():
         data_dir = (PROJECT_ROOT / data_dir).resolve()
-    
-    transform = get_hip_base_transform(input_size)
 
-    # 單側資料集
-    train_dataset = HipCropKeypointDataset(
-        img_dir = data_dir / 'train' / 'images',
-        annotation_dir = data_dir / 'train' / 'annotations',
-        detections_dir = data_dir / 'train' / 'detections',
-        side=side,
-        transform=transform,
-        crop_expand=BBOX_EXPAND,
-        keep_square=True,
+    # 使用單階段的 base transform（不包含前處理的增強，因黑邊只能在 Dataset 實作）
+    base_transform = get_full_image_base_transform(input_size)
+    
+    # 1. 建立單階段全圖資料集
+    train_dataset = FullImageKeypointDataset(
+        img_dir=data_dir / 'train' / 'images',
+        annotation_dir=data_dir / 'train' / 'annotations',
+        transform=base_transform,
         input_size=input_size,
-        bbox_jitter=BBOX_JITTER, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
     )
-    val_dataset = HipCropKeypointDataset(
-        img_dir = data_dir / 'val' / 'images',
-        annotation_dir = data_dir / 'val' / 'annotations',
-        detections_dir = data_dir / 'val' / 'detections',
-        side=side,
-        transform=transform,
-        crop_expand=BBOX_EXPAND,
-        keep_square=True,
+    val_dataset = FullImageKeypointDataset(
+        img_dir=data_dir / 'val' / 'images',
+        annotation_dir=data_dir / 'val' / 'annotations',
+        transform=base_transform,
         input_size=input_size,
-        bbox_jitter=False
     )
     
-    points_count = train_dataset.num_keypoints
-    print(f"Auto-detected dataset points per side: {points_count}")
-    
-    # 使用鏡像資料擴增
-    if mirror:
-        opposite_side = "right" if side == "left" else "left"
-        print(f"Preparing mirrored data from {opposite_side} side...")
-        opposite_train_dataset = HipCropKeypointDataset(
-            img_dir=data_dir / 'train' / 'images',
-            annotation_dir=data_dir / 'train' / 'annotations',
-            detections_dir=data_dir / 'train' / 'detections',
-            side=opposite_side,
-            transform=transform,
-            crop_expand=BBOX_EXPAND,
-            keep_square=True,
-            input_size=input_size,
-            bbox_jitter=BBOX_JITTER, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
-        )
-        opposite_val_dataset = HipCropKeypointDataset(
-            img_dir=data_dir / 'val' / 'images',
-            annotation_dir=data_dir / 'val' / 'annotations',
-            detections_dir=data_dir / 'val' / 'detections',
-            side=opposite_side,
-            transform=transform,
-            crop_expand=BBOX_EXPAND,
-            keep_square=True,
-            input_size=input_size,
-            bbox_jitter=False
-        )
-        # 建立鏡像資料集
-        mirrored_dataset = MirroredToSideDataset(opposite_train_dataset, target_side=side)
-        mirrored_val_dataset = MirroredToSideDataset(opposite_val_dataset, target_side=side)
-        # 合併原本的單側資料集與鏡像資料集
-        train_dataset = ConcatDataset([train_dataset, mirrored_dataset])
-        val_dataset = ConcatDataset([val_dataset, mirrored_val_dataset])
-        print(f"using mirrored data from {opposite_side} side, total training samples: {len(train_dataset)}")
-        
-    # 資料增強
-    augmented_dataset = ProbAugmentedKeypointDataset(train_dataset, p=0.7, max_translate_x=10, max_translate_y=10, max_angle=5, clamp=True)
-    
-    # # To visualize the dataset
-    # display_image(train_dataset, 0)
-    # display_image(mirrored_dataset, 0)
-    # for i in range(0, 3):
-    #     display_image(augmented_dataset, i)
-    #     display_image(augmented_dataset2, i)
-    
+    points_count = train_dataset.total_points
+    print(f"[One-Stage] Training points: {points_count}")
+
+    # 2. 單階段嚴謹的資料增強 (包含水平翻轉、比例平移、縮放)
+    augmented_train_dataset = FullImageAugmentedDataset(
+        train_dataset, 
+        p=0.7, 
+        max_angle=10, 
+        trans_ratio=0.05,  # 5% 的偏移
+        scale_range=0.15,  # 0.85 ~ 1.15 倍縮放
+        clamp=True
+    )
+
     g = torch.Generator()
     g.manual_seed(42)
     
-    train_loader = DataLoader(augmented_dataset, batch_size=batch_size, shuffle=True,
-                                num_workers=24, pin_memory=True, prefetch_factor=8, worker_init_fn=seed_worker, generator=g)
+    train_loader = DataLoader(augmented_train_dataset, batch_size=batch_size, shuffle=True,
+                              num_workers=16, pin_memory=True, worker_init_fn=seed_worker, generator=g)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                                num_workers=24, pin_memory=True, prefetch_factor=8)
-
-    print(f"[{side.upper()}] Training samples: {len(augmented_dataset)}, Validation samples: {len(val_dataset)}")
+                            num_workers=8, pin_memory=True)
     
     # Initialize the model, loss function, and optimizer
     if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"]:
@@ -198,15 +117,6 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
     
-    # param_groups = get_muon_param_groups(model, lr=learning_rate, weight_decay=0.0005)
-    # optimizer = MuSGD(
-    #     param_groups, 
-    #     momentum=0.937,     # MuSGD
-    #     nesterov=True,
-    #     muon=0.9,         # Muon 更新權重比例 (預設 0.5)
-    #     sgd=0.1           # SGD 更新權重比例 (預設 0.5)
-    # )
-
     # Scheduler: Warm-up + Cosine
     total_steps = len(train_loader) * epochs
     warmup_steps = max(1, int(0.1 * total_steps))   # 前 10% steps 線性升溫
@@ -242,8 +152,6 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     exp_name = build_experiment_name(
         model_name=model_name,
         head_type=head_type,
-        side=side,
-        mirror=mirror,
         input_size=input_size,
         epochs=epochs,
         learning_rate=learning_rate,
@@ -411,8 +319,6 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         "head_type": head_type,
         "sr": split_ratio if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] else 1.0,
         "sigma": sigma if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] else None,
-        "side": side,
-        "mirror": int(mirror),
         "epochs": epochs,
         "lr": learning_rate,
         "batch_size": batch_size,
@@ -477,8 +383,6 @@ if __name__ == "__main__":
     parser.add_argument("--input_size", type=int, default=224, help="Input image size for the model")
     parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--batch_size", type=int, default=8, help="Number of samples per batch")
-    parser.add_argument("--side", type=str, default="left", choices=["left", "right"], help="Side to train on: 'left' or 'right'")
-    parser.add_argument("--mirror", action="store_true", help="Whether to include mirrored data from the opposite side")
     parser.add_argument("--head_type", type=str, default="direct_regression", choices=["direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv"], help="Type of model head to use")
     parser.add_argument("--split_ratio", type=float, default=2, help="SimCC split ratio for label encoding")
     parser.add_argument("--sigma", type=float, default=6.0, help="Sigma for SimCC label encoding")
@@ -486,6 +390,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     train(args.data_dir, args.model_name, args.input_size, args.epochs, args.learning_rate,
-         args.batch_size, args.side, args.mirror, head_type=args.head_type, split_ratio=args.split_ratio, sigma=args.sigma)
+         args.batch_size, head_type=args.head_type, split_ratio=args.split_ratio, sigma=args.sigma)
 
-    # python3 train_hip_crop_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name convnext_tiny_fpn1234concat --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 64 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
+    # python3 train_full_image_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name hrnet_w32 --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 64 --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
