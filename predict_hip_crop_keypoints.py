@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import json
-import re
 import csv
 import seaborn as sns
 from sklearn.metrics import (
@@ -36,6 +35,7 @@ from utils.hip_geometry import (
     project_to_metric6
 )
 from utils.plots import add_sigma_guides, add_zscore_right_axis
+from utils.evaluation import extract_info_from_model_path
 from collections import OrderedDict
 
 YOLO_LEFT_CLS  = 0
@@ -294,84 +294,6 @@ def calc_point_dists(pred_kpts: np.ndarray, gt_kpts: np.ndarray) -> np.ndarray:
     dists = np.linalg.norm(diff, axis=1)
     
     return dists
-
-def extract_info_from_model_path(model_path):
-    """
-    支援的命名格式：
-
-    SimCC 系列 (有 sr / sigma)，head_type 可以是：
-      - simcc_1d
-      - simcc_2d
-      - simcc_2d_deconv
-
-    例如：
-      model_simcc_1d_sr2.0_sigma6.0_cropright_mirror_224_300_0.0001_32_best.pth
-      model_simcc_2d_deconv_sr1.5_sigma3.0_cropleft_448_300_0.0001_32.pth
-
-    direct_regression (沒有 sr / sigma)：
-      model_direct_regression_cropleft_448_300_0.0001_32_best.pth
-    """
-    filename = os.path.basename(model_path)
-
-    # 1) SimCC 系列：先抓 head_type + sr + sigma
-    #   e.g. _simcc_sr2.0_..., _simcc_1d_sr2.0_..., _simcc_2d_deconv_sr2.0_...
-    pattern_simcc = re.compile(
-        r'_('
-        r'simcc_2d_deconv|simcc_2d|simcc_1d'
-        r')'                                  # group(1): head_type
-        r'_sr([0-9eE\.\-]+)'                  # group(2): split_ratio (sr)
-        r'_sigma([0-9eE\.\-]+)'               # group(3): sigma
-        r'_crop(left|right)'                  # group(4): side
-        r'(?:_mirror)?'                       # optional _mirror
-        r'_(\d+)'                             # group(5): input_size
-        r'_([0-9]+)'                          # group(6): epochs
-        r'_([0-9eE\.\-]+)'                    # group(7): learning_rate
-        r'_([0-9]+)'                          # group(8): batch_size
-    )
-
-    m = pattern_simcc.search(filename)
-    if m:
-        head_type     = m.group(1)
-        split_ratio   = float(m.group(2))
-        sigma         = float(m.group(3))
-        # side        = m.group(4)
-        input_size    = int(m.group(5))
-        epochs        = int(m.group(6))
-        learning_rate = float(m.group(7))
-        batch_size    = int(m.group(8))
-        return head_type, input_size, epochs, learning_rate, batch_size, split_ratio, sigma
-
-    # 2) direct_regression
-    pattern_dr = re.compile(
-        r'_(direct_regression)'               # group(1): head_type
-        r'_crop(left|right)'                  # group(2): side
-        r'(?:_mirror)?'                       # optional _mirror
-        r'_(\d+)'                             # group(3): input_size
-        r'_([0-9]+)'                          # group(4): epochs
-        r'_([0-9eE\.\-]+)'                    # group(5): learning_rate
-        r'_([0-9]+)'                          # group(6): batch_size
-    )
-
-    m2 = pattern_dr.search(filename)
-    if m2:
-        head_type     = m2.group(1)          # "direct_regression"
-        # side        = m2.group(2)
-        input_size    = int(m2.group(3))
-        epochs        = int(m2.group(4))
-        learning_rate = float(m2.group(5))
-        batch_size    = int(m2.group(6))
-        split_ratio   = None
-        sigma         = None
-        return head_type, input_size, epochs, learning_rate, batch_size, split_ratio, sigma
-
-    # 3) 都沒 match 就報錯
-    raise ValueError(
-        f"Model path format is invalid: {filename}\n"
-        "Expected something like:\n"
-        "  model_simcc_1d_sr2.0_sigma6.0_cropleft_448_300_0.0001_32[_best.pth]\n"
-        "  model_simcc_2d_deconv_sr2.0_sigma6.0_cropleft_448_300_0.0001_32[_best.pth]\n"
-        "  model_direct_regression_cropleft_448_300_0.0001_32[_best.pth]"
-    )
 
 def draw_comparison_figure(
     image, pred_kpts, gt_kpts, ai_pred, ai_gt,
@@ -1016,8 +938,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         
         # 1. Avg Distance (Based on Raw Points)
         dist = calculate_avg_distance(kps_pred_raw, kps_gt_raw)
-        if dist >= 50:
-            print(f"[Skip] {fname} distance too large: {dist:.2f}"); continue
+        # if dist >= 50:
+        #     print(f"[Skip] {fname} distance too large: {dist:.2f}"); continue
         all_avg_distances.append(dist)
         image_labels.append(idx)
 

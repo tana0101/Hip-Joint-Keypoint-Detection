@@ -160,8 +160,8 @@ def simcc_loss_fn(
         simcc_loss_module = SimCCLoss(reduction="mean")
     return simcc_loss_module(pred_x, pred_y, target_x, target_y, target_weight)
 
-
-def decode_simcc_to_xy(
+# 期望值解碼器 (Expectation-based Decoder)：
+def decode_simcc_expectation_to_xy(
     pred_x: torch.Tensor,  # [B, K, Nx] logits
     pred_y: torch.Tensor,  # [B, K, Ny] logits
     Nx: int,
@@ -196,6 +196,69 @@ def decode_simcc_to_xy(
     y = y_idx / float(Ny) * float(input_size)  # [B, K]
 
     # 拼成 [B, K, 2] -> [B, 2*K] (x1,y1,x2,y2,...)
+    coords = torch.stack([x, y], dim=-1)  # [B, K, 2]
+
+    return coords
+
+# SimCC 官方的啟發式解碼器 (Heuristic-based Decoder)
+def decode_simcc_heuristic_to_xy(
+    pred_x: torch.Tensor,  # [B, K, Nx] logits
+    pred_y: torch.Tensor,  # [B, K, Ny] logits
+    Nx: int,
+    Ny: int,
+    input_size: int,
+) -> torch.Tensor:
+    """
+    將 SimCC 的 logits 使用啟發式 (Argmax + 0.25 shift) 轉回連續座標
+    與 get_final_preds 的邏輯等價，但針對 SimCC 1D 分布進行了向量化改寫。
+
+    做法：
+      1. 取 X, Y 維度上的最大值索引 (Argmax) 作為初始離散座標。
+      2. 比較最大值左右（上下）相鄰的 logits 大小。
+      3. 朝著較大的一方偏移 0.25 (若不在邊界上)。
+      4. Scale 回 pixel 空間: coord = idx / N_axis * input_size
+    """
+    device = pred_x.device
+    B, K, _ = pred_x.shape
+
+    # 1. 取得最大值的離散 index (等同於 get_max_preds)
+    # 形狀均為 [B, K]
+    idx_x_long = torch.argmax(pred_x, dim=-1)
+    idx_y_long = torch.argmax(pred_y, dim=-1)
+
+    # 2. 計算鄰近點的 index (加入 clamp 避免超出邊界)
+    idx_x_plus = torch.clamp(idx_x_long + 1, max=Nx - 1)
+    idx_x_minus = torch.clamp(idx_x_long - 1, min=0)
+    
+    idx_y_plus = torch.clamp(idx_y_long + 1, max=Ny - 1)
+    idx_y_minus = torch.clamp(idx_y_long - 1, min=0)
+
+    # 3. 使用 gather 提取相鄰點的數值 (代替原本 for 迴圈中的 hm[py][px+1])
+    # 注意：在判斷方向時，直接使用 logits 取 sign 與經過 softmax 後取 sign 的結果是一樣的，可以省去 softmax 計算。
+    val_x_plus = torch.gather(pred_x, 2, idx_x_plus.unsqueeze(-1)).squeeze(-1)
+    val_x_minus = torch.gather(pred_x, 2, idx_x_minus.unsqueeze(-1)).squeeze(-1)
+    
+    val_y_plus = torch.gather(pred_y, 2, idx_y_plus.unsqueeze(-1)).squeeze(-1)
+    val_y_minus = torch.gather(pred_y, 2, idx_y_minus.unsqueeze(-1)).squeeze(-1)
+
+    # 計算差值 (diff)
+    diff_x = val_x_plus - val_x_minus
+    diff_y = val_y_plus - val_y_minus
+
+    # 4. 邊界遮罩 (等同於 if 0 < px < heatmap_width-1)
+    # 確保不會在邊界上進行偏移
+    mask_x = (idx_x_long > 0) & (idx_x_long < Nx - 1)
+    mask_y = (idx_y_long > 0) & (idx_y_long < Ny - 1)
+
+    # 套用 0.25 的偏移量 (idx += np.sign(diff) * 0.25)
+    idx_x_float = idx_x_long.float() + torch.sign(diff_x) * 0.25 * mask_x.float()
+    idx_y_float = idx_y_long.float() + torch.sign(diff_y) * 0.25 * mask_y.float()
+
+    # 5. scale 回 pixel 空間
+    x = idx_x_float / float(Nx) * float(input_size)  # [B, K]
+    y = idx_y_float / float(Ny) * float(input_size)  # [B, K]
+
+    # 拼成 [B, K, 2]
     coords = torch.stack([x, y], dim=-1)  # [B, K, 2]
 
     return coords

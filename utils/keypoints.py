@@ -1,4 +1,4 @@
-from utils.simcc import decode_simcc_to_xy
+from utils.simcc import decode_simcc_expectation_to_xy as decode_simcc_to_xy
 
 # predicted coordinates from model outputs
 def get_pred_coords(outputs, head_type, Nx=None, Ny=None, input_size=None):
