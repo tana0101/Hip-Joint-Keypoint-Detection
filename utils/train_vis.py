@@ -12,13 +12,15 @@ class GraphWrapper(nn.Module):
         if isinstance(out, dict):
             if self.head_type == "direct_regression":
                 return out["coords"]       # [B, J, 2]
+            elif self.head_type == "heatmap":
+                return out["heatmaps"]     # [B, J, H, W]
             else:
                 return out["logits_x"]     # simcc 系列就挑一個輸出給 tracer
         return out
     
 def display_image(dataset, index):
-    # Get the nth image and keypoints
-    image, keypoints, original_size = dataset[index]
+    # 從 dataset 取出影像和 keypoints
+    image, keypoints, original_size, *_ = dataset[index]
     print(f"Displaying image {index}")
     print("Original size:", original_size)
     print("Image shape:", image.shape)

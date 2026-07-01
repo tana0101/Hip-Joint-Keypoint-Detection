@@ -2,7 +2,6 @@ import os
 import argparse
 import torch
 import numpy as np
-import re
 from PIL import Image, ImageOps
 import torchvision.transforms.functional as TF
 
@@ -33,7 +32,7 @@ from utils.hip_geometry import (
     unify_keypoints_format
 )
 
-def predict_onestage(model_name, model_path, data_dir, output_dir, model_points=None):
+def predict_onestage(model_name, model_path, data_dir, output_dir, fold_index=None, model_points=None):
     
     # 0. 判斷點數 (全圖偵測)
     ann_dir = os.path.join(data_dir, 'annotations')
@@ -59,10 +58,15 @@ def predict_onestage(model_name, model_path, data_dir, output_dir, model_points=
 
     # 2. 建立輸出目錄
     exp_suffix = f"_{total_points}pt"
-    if head_type.startswith("simcc"): exp_name = f"{model_name}_{head_type}_sr{split_ratio}_onestage{exp_suffix}"
-    else: exp_name = f"{model_name}_{head_type}_onestage{exp_suffix}"
     
-    result_dir = os.path.join(output_dir, exp_name)
+    if head_type.startswith("simcc"): 
+        exp_name = f"{model_name}_{head_type}_sr{split_ratio}_sigma{sigma}_onestage{exp_suffix}"
+    elif head_type == "heatmap":
+        exp_name = f"{model_name}_{head_type}_sigma{sigma}_onestage{exp_suffix}"
+    else: 
+        exp_name = f"{model_name}_{head_type}_onestage{exp_suffix}"
+    
+    result_dir = output_dir if fold_index is not None else os.path.join(output_dir, exp_name)
     os.makedirs(result_dir, exist_ok=True)
     dist_ranges = build_distance_ranges(result_dir)
 
@@ -240,6 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", type=str, required=True, help="Path to one-stage model (.pth)")
     parser.add_argument("--data", type=str, required=True, help="data directory")
     parser.add_argument("--output_dir", type=str, default="results", help="output directory")
+    parser.add_argument("--fold_index", type=int, default=None, help="Fold index for cross-validation (optional)")
     parser.add_argument("--model_points", type=int, default=None, help="Force number of keypoints (optional)")
     args = parser.parse_args()
 
@@ -248,13 +253,14 @@ if __name__ == "__main__":
         args.model_path,
         args.data,
         args.output_dir,
+        args.fold_index,
         args.model_points
     )
 
 """
 python predict_full_image_keypoints.py \
-  --model_name convnext_tiny_fpn1234concat \
-  --model_path weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_onestage_224_200_0.0001_64_best.pth \
+  --model_name hrnet_w32 \
+  --model_path weights/hrnet_w32_heatmap_sigma4.0_onestage_224_200_0.0001_8_best.pth \
   --data "data/test" \
   --output_dir "results_onestage_mtddh_set"
 """

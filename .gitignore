@@ -12,5 +12,13 @@ mtddh_xray_2d/
 runs/
 results*/
 results_kfold*/
-check_left_hip_crops/
+check_left_hip_crops_original/
+check_left_hip_crops_hist_eq/
+check_left_hip_crops_augmented/
+check_right_hip_crops_original/
+check_right_hip_crops_hist_eq/
+check_right_hip_crops_augmented/
+check_full_image_augmented/
+check_right_to_left_hip_crops_augmented/
+check_right_to_left_hip_crops_hist_eq/
 output/
