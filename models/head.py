@@ -76,10 +76,14 @@ class HeadAdapter(nn.Module):
                 num_deconv_layers=num_deconv_layers,
                 deconv_filters=deconv_filters,
             )
-        else:
-            raise ValueError(
-                f"Unknown head_type: {head_type}. "
-                f"Choices = ['direct_regression', 'simcc_1d', 'simcc_2d', 'simcc_2d_deconv']"
+            
+        elif head_type == "heatmap":
+            self.head_heatmap = HeatmapHead(
+                in_channels=in_channels,
+                num_points=num_points,
+                backbone_map_size=map_size,
+                num_deconv_layers=num_deconv_layers,
+                deconv_filters=deconv_filters,
             )
     
     # ========= helper: 處理 [B,C,H,W] / [B,C] 兩種情況 =========
@@ -133,7 +137,13 @@ class HeadAdapter(nn.Module):
                 "logits_y": logits_y,
                 "heatmaps": heatmaps,
             }
-        
+            
+        if self.head_type == "heatmap":
+            heatmaps = self.head_heatmap(feat)
+            return {
+                "type": "heatmap",
+                "heatmaps": heatmaps,
+            }
 
 # ===== 具體的 Head 實作 =====
 class DirectRegressionHead(nn.Module):
@@ -289,9 +299,60 @@ class SimCC2D_DeconvHead(nn.Module):
 
         return logits_x, logits_y, heatmaps
 
+class HeatmapHead(nn.Module):
+    """
+    標準 2D Heatmap 方法 (SimpleBaseline 風格)
+    吃 backbone feature map [B, C_in, Hf, Wf]
+    deconv -> Conv2d(output=num_points) -> heatmap [B, num_points, H, W]
+    """
+    def __init__(
+        self,
+        in_channels,         
+        num_points,
+        backbone_map_size,   
+        num_deconv_layers=3,
+        deconv_filters=(256, 256, 256),
+    ):
+        super().__init__()
+        self.num_points = num_points
+        self.in_channels = in_channels
+
+        # 沿用與 SimCC 相同的 deconv 建立邏輯
+        self.deconv = self._make_deconv_layers(in_channels, num_deconv_layers, deconv_filters)
+        last_channels = deconv_filters[-1]
+        # final conv: 輸出 [B, num_points, H, W]
+        self.final_conv = nn.Conv2d(
+            in_channels=last_channels,
+            out_channels=num_points,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+        )
+
+    def _make_deconv_layers(self, in_channels, num_layers, num_filters):
+        layers = []
+        for i in range(num_layers):
+            out_channels = num_filters[i]
+            layers.append(
+                nn.ConvTranspose2d(
+                    in_channels=in_channels, out_channels=out_channels,
+                    kernel_size=4, stride=2, padding=1, bias=False,
+                )
+            )
+            layers.append(nn.BatchNorm2d(out_channels))
+            layers.append(nn.ReLU(inplace=True))
+            in_channels = out_channels
+        return nn.Sequential(*layers)
+
+    def forward(self, feat):
+        y = self.deconv(feat)
+        heatmaps = self.final_conv(y)
+        return heatmaps
+
 HEAD_MODULES = {
     "direct_regression": DirectRegressionHead,
     "simcc_1d": SimCC1DHead,
     "simcc_2d": SimCC2DHead,
     "simcc_2d_deconv": SimCC2D_DeconvHead,
+    "heatmap": HeatmapHead,
 }

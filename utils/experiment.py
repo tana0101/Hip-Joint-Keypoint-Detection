@@ -21,7 +21,7 @@ def build_experiment_name(
     # 只有 simcc 系列 head 才會加 sr 跟 sigma
     if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] and split_ratio is not None:
         base += f"_sr{split_ratio}"
-    if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv"] and sigma is not None:
+    if head_type in ["simcc_1d", "simcc_2d", "simcc_2d_deconv", "heatmap"] and sigma is not None:
         base += f"_sigma{sigma}"
 
     # === 區分單階段與雙階段的檔名 ===

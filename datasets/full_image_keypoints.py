@@ -1,6 +1,5 @@
 import os
 import torch
-import numpy as np
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset
 from utils.csv_parser import parse_csv_get_points

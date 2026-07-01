@@ -12,8 +12,10 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from tqdm import tqdm
 
-from .augment import ProbAugmentedKeypointDataset
+from .full_image_keypoints import FullImageKeypointDataset
+from .augment import ProbAugmentedKeypointDataset, FullImageAugmentedDataset
 from utils.csv_parser import parse_csv_get_points
+from datasets.transforms import get_full_image_base_transform
 
 DATASET_CONFIGS_BY_COUNT = {
     12: {
@@ -349,7 +351,6 @@ if __name__ == "__main__":
     from .transforms import get_hip_base_transform
 
     transform = get_hip_base_transform(input_size=224)
-
     dataset = HipCropKeypointDataset(
         # img_dir="../dataset/xray_IHDI_6/images",
         # annotation_dir="../dataset/xray_IHDI_6/annotations",
@@ -362,9 +363,26 @@ if __name__ == "__main__":
         crop_expand=0.0,
         keep_square=True,
         input_size=224,
-        bbox_jitter=True, jitter_center=0.05, jitter_scale=0.10, jitter_prob=0.7
+        bbox_jitter=True, jitter_center=0.05, jitter_scale=0.10, jitter_prob=0.7 # test: bbox_jitter=True, jitter_center=0.15, jitter_scale=0.20, jitter_prob=1
     )
-    
+    mirrored_dataset = MirroredToSideDataset(dataset, target_side="left")
     augmented_dataset = ProbAugmentedKeypointDataset(dataset, p=0.7, max_translate_x=10, max_translate_y=10, max_angle=5, clamp=True)
+    # base_transform = get_full_image_base_transform(224)
+    # dataset = FullImageKeypointDataset(
+    #     img_dir="dataset/mtddh_xray_2d/images",
+    #     annotation_dir="dataset/mtddh_xray_2d/annotations",
+    #     transform=base_transform,
+    #     input_size=224,
+    # )
+    # augmented_dataset = FullImageAugmentedDataset(
+    #     dataset, 
+    #     p=0.7, 
+    #     max_angle=10, 
+    #     trans_ratio=0.05,  # 5% 的偏移
+    #     scale_range=0.15,  # 0.85 ~ 1.15 倍縮放
+    #     clamp=True
+    # )
 
-    save_all_visualizations(augmented_dataset, output_dir="check_left_hip_crops")
+    save_all_visualizations(augmented_dataset, output_dir="check_right_to_left_hip_crops_augmented")
+    
+# python -m datasets.hip_crop_keypoints

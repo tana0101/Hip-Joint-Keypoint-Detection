@@ -869,8 +869,13 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     # 3. 建立輸出資料夾
     crop_side = "both" if (use_left and use_right) else ("left" if use_left else "right")
     exp_suffix = f"_{total_points}pt"
-    if head_type.startswith("simcc"): exp_name = f"{model_name}_{head_type}_sr{split_ratio}_{crop_side}{exp_suffix}"
-    else: exp_name = f"{model_name}_{head_type}_{crop_side}{exp_suffix}"
+    
+    if head_type.startswith("simcc"): 
+        exp_name = f"{model_name}_{head_type}_sr{split_ratio}_sigma{sigma}_{crop_side}{exp_suffix}"
+    elif head_type == "heatmap":
+        exp_name = f"{model_name}_{head_type}_sigma{sigma}_{crop_side}{exp_suffix}"
+    else: 
+        exp_name = f"{model_name}_{head_type}_{crop_side}{exp_suffix}"
     
     result_dir = output_dir if fold_index is not None else os.path.join(output_dir, exp_name)
     os.makedirs(result_dir, exist_ok=True)

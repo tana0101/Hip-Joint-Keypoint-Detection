@@ -26,6 +26,7 @@ from utils.simcc import (
     simcc_loss_fn,
 )
 from utils.regression import compute_loss_direct_regression
+from utils.heatmap import compute_loss_heatmap
 from utils.ema import ModelEMA
 from models.model import initialize_model
 from pathlib import Path
@@ -192,6 +193,17 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
                 sigma=sigma,
                 simcc_label_encoder=simcc_label_encoder,
                 simcc_loss_fn=simcc_loss_fn,
+            )
+    elif head_type == "heatmap":
+        criterion = nn.MSELoss()
+        def loss_fn(outputs, keypoints):
+            _, _, H_out, W_out = outputs["heatmaps"].shape
+            return compute_loss_heatmap(
+                outputs, keypoints, 
+                heatmap_size=(H_out, W_out), 
+                input_size=input_size, 
+                sigma=sigma,
+                criterion=criterion
             )
     else:
         raise ValueError(f"Unknown head_type: {head_type}")
@@ -479,9 +491,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=8, help="Number of samples per batch")
     parser.add_argument("--side", type=str, default="left", choices=["left", "right"], help="Side to train on: 'left' or 'right'")
     parser.add_argument("--mirror", action="store_true", help="Whether to include mirrored data from the opposite side")
-    parser.add_argument("--head_type", type=str, default="direct_regression", choices=["direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv"], help="Type of model head to use")
+    parser.add_argument("--head_type", type=str, default="direct_regression", choices=["direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv", "heatmap"], help="Type of model head to use")
     parser.add_argument("--split_ratio", type=float, default=2, help="SimCC split ratio for label encoding")
-    parser.add_argument("--sigma", type=float, default=6.0, help="Sigma for SimCC label encoding")
+    parser.add_argument("--sigma", type=float, default=6.0, help="Sigma for SimCC and heatmap generation")
     
     args = parser.parse_args()
 
