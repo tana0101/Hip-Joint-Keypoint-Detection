@@ -536,7 +536,7 @@ def compute_and_save_confusion_matrices_with_metrics(
 
     return results
 
-def plot_avg_distances(image_labels, all_avg_distances, result_dir, tick_step=50):
+def plot_avg_distances(image_labels, all_avg_distances, result_dir, tick_step=50, dpi=100):
     """
     繪製每張影像的平均距離長條圖。
     """
@@ -545,7 +545,7 @@ def plot_avg_distances(image_labels, all_avg_distances, result_dir, tick_step=50
     target_ticks = indices[::tick_step]
     target_labels = [str(image_labels[i]) for i in target_ticks]
 
-    fig, ax = plt.subplots(figsize=(16, 6))
+    fig, ax = plt.subplots(figsize=(16, 6), dpi=dpi)
     
     # 畫長條圖
     ax.bar(indices, all_avg_distances, label='Avg Distance per Image')
@@ -582,7 +582,7 @@ def plot_avg_distances(image_labels, all_avg_distances, result_dir, tick_step=50
     return mu_dist, std_dist
 
 
-def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_dir, tick_step=50, bar_width=0.4):
+def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_dir, tick_step=50, bar_width=0.4, dpi=100):
     """
     繪製每張影像的 AI 角度誤差長條圖 (左右腳)。
     """
@@ -591,7 +591,7 @@ def plot_ai_angle_errors(image_labels, ai_errors_left, ai_errors_right, result_d
     target_ticks = indices[::tick_step]
     target_labels = [str(image_labels[i]) for i in target_ticks]
 
-    fig, ax = plt.subplots(figsize=(16, 6))
+    fig, ax = plt.subplots(figsize=(16, 6), dpi=dpi)
 
     # 分開畫左右腳，並偏移 X 軸位置避免重疊
     ax.bar(indices - bar_width/2, ai_errors_left,  width=bar_width, label='Left AI Error', color='magenta')
