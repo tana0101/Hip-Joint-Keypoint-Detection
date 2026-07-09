@@ -178,3 +178,12 @@ python kfold_split.py \
   --seed 42 \
   --overwrite
 '''
+
+'''
+python kfold_split.py \
+  --src dataset/xray_IHDI_2_clean\
+  --dst data \
+  --k 5 \
+  --seed 42 \
+  --overwrite
+'''

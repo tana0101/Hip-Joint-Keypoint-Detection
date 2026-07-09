@@ -10,6 +10,8 @@ from predict_hip_crop_keypoints import (
     plot_ai_angle_scatter,
     plot_pixel_vs_angle_error,
     plot_error_histogram_with_shapiro,
+    plot_avg_distances, 
+    plot_ai_angle_errors,
 )
 
 def main():
@@ -215,6 +217,36 @@ def main():
     # per-image 平均 AI angle error
     all_ai_err_avg = (all_ai_err_left + all_ai_err_right) / 2.0
 
+    # ===================================================
+    # [新增] 繪製所有 Folds 合併後的平均距離圖與 AI 角度誤差圖
+    # ===================================================
+    # 建立總和樣本的 image_labels (1, 2, 3, ..., N)
+    all_image_labels = list(range(1, len(all_dist) + 1))
+    
+    # 若合併後的樣本數很多，可以視情況調大 tick_step_val (例如 50 或 100)
+    tick_step_val = 50 
+    dpi = 300  # 圖片解析度
+
+    # 1.5) 繪製平均距離圖 (All folds)
+    mu_dist_all, std_dist_all = plot_avg_distances(
+        image_labels=all_image_labels,
+        all_avg_distances=all_dist,
+        result_dir=all_folds_summary_dir,
+        tick_step=tick_step_val,
+        dpi = dpi
+    )
+    
+    # 1.6) 繪製 AI 角度誤差圖 (All folds)
+    avg_err_l_all, avg_err_r_all, mu_ai_err_all, std_ai_err_all = plot_ai_angle_errors(
+        image_labels=all_image_labels,
+        ai_errors_left=all_ai_err_left,
+        ai_errors_right=all_ai_err_right,
+        result_dir=all_folds_summary_dir,
+        tick_step=tick_step_val,
+        dpi = dpi
+    )
+    # ===================================================
+
     # ---- 2) avg_distances 直方圖（全部 image）----
     plt.figure(figsize=(8, 6))
     plt.hist(all_dist, bins=30, alpha=0.75, edgecolor="black")
@@ -251,7 +283,7 @@ def main():
         save_path=scatter_overall_path,
     )
     
-    # ---- 5) 
+    # ---- 5) 誤差分佈直方圖與 Shapiro-Wilk 檢定
     signed_errors_left_all = np.asarray(all_ai_left_pred, dtype=float) - np.asarray(all_ai_left_gt, dtype=float)
     signed_errors_right_all = np.asarray(all_ai_right_pred, dtype=float) - np.asarray(all_ai_right_gt, dtype=float)
     p_val_shapiro_all = plot_error_histogram_with_shapiro(

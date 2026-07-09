@@ -6,7 +6,7 @@ import re
 
 # ================= 設定區域 =================
 # 定義基礎路徑
-BASE_DIR = 'mtddh_xray_2d'
+BASE_DIR = 'xray_IHDI_2'
 
 # 輸入資料夾 (指向 mtddh_xray_2d 內部)
 DIR_IMAGES = os.path.join(BASE_DIR, 'images')
@@ -51,7 +51,7 @@ def parse_csv_points(csv_path):
                 points.append((nums[i], nums[i+1]))
     return points
 
-def draw_text_with_outline(img, text, pos, font_scale=0.6, thickness=1):
+def draw_text_with_outline(img, text, pos, font_scale=2, thickness=1):
     """畫出有黑色邊框的白色文字，確保清晰可見"""
     x, y = pos
     cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_TEXT_BG, thickness + 2)
@@ -130,9 +130,9 @@ def main():
                 
                 cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
                 
-                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
                 cv2.rectangle(img, (x1, y1 - th - 5), (x1 + tw, y1), color, -1)
-                cv2.putText(img, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(img, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         # ------------------------------------------------
         # 3. 繪製 Annotations CSV (關鍵點與編號)
@@ -141,7 +141,7 @@ def main():
         points = parse_csv_points(csv_path)
         
         for idx, (px, py) in enumerate(points):
-            cv2.circle(img, (px, py), 5, COLOR_POINT, -1)
+            cv2.circle(img, (px, py), 8, COLOR_POINT, -1)
             draw_text_with_outline(img, str(idx + 1), (px + 8, py - 8))
 
         # ------------------------------------------------
