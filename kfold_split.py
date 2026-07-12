@@ -112,42 +112,7 @@ def main(args):
 
         print(f"[INFO] {fold_name} done at {fold_root}")
 
-    # ==== 產生每一折的 train/val txt + data_fold{i}.yaml ====
-    for fold_idx in range(1, k + 1):
-        # val = 該 fold
-        val_list = folds_img_relpaths[fold_idx]
-        # train = 其它所有 fold
-        train_list = []
-        for f in range(1, k + 1):
-            if f == fold_idx:
-                continue
-            train_list.extend(folds_img_relpaths[f])
-
-        print(f"[INFO] Fold {fold_idx}: train = {len(train_list)}, val = {len(val_list)}")
-
-        train_txt = dst_root / f"train_fold{fold_idx}.txt"
-        val_txt = dst_root / f"val_fold{fold_idx}.txt"
-
-        with train_txt.open("w") as f:
-            for p in train_list:
-                f.write(p + "\n")
-
-        with val_txt.open("w") as f:
-            for p in val_list:
-                f.write(p + "\n")
-
-        # YOLO data yaml
-        yaml_path = dst_root / f"data_fold{fold_idx}.yaml"
-        with yaml_path.open("w") as f:
-            f.write(f"train: {train_txt.name}\n")
-            f.write(f"val: {val_txt.name}\n")
-            f.write("names:\n")
-            f.write("  0: hip_left\n")
-            f.write("  1: hip_right\n")
-
-        print(f"[INFO] YOLO yaml for fold {fold_idx}: {yaml_path}")
-
-    print("[INFO] All folds and data_fold{i}.yaml created successfully.")
+    print("[INFO] All folds created successfully.")
 
 
 if __name__ == "__main__":

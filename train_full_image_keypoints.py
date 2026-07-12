@@ -114,7 +114,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, h
                 simcc_loss_fn=simcc_loss_fn,
             )
     elif head_type == "heatmap":
-        criterion = nn.MSELoss()
+        criterion = nn.MSELoss(reduction='mean')
         def loss_fn(outputs, keypoints):
             _, _, H_out, W_out = outputs["heatmaps"].shape
             return compute_loss_heatmap(
@@ -404,4 +404,5 @@ if __name__ == "__main__":
     train(args.data_dir, args.model_name, args.input_size, args.epochs, args.learning_rate,
          args.batch_size, head_type=args.head_type, split_ratio=args.split_ratio, sigma=args.sigma)
 
-    # python3 train_full_image_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name hrnet_w32 --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 64 --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
+    # python train_full_image_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name hrnet_w32 --input_size 224 --epochs 200 --learning_rate 0.0002 --batch_size 16 --head_type heatmap --sigma 4.0
+    # python train_full_image_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name hrnet_w48 --input_size 224 --epochs 200 --learning_rate 0.0002 --batch_size 8 --head_type heatmap --sigma 4.0

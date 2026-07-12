@@ -36,8 +36,12 @@ MODELS_DIR = "weights"
 BBOX_JITTER = True
 BBOX_EXPAND = 0.05
 BBOX_JITTER_PROB = 0.7
-BBOX_JITTER_CENTER = 0.05
-BBOX_JITTER_SCALE = 0.10
+BBOX_JITTER_CENTER = 0.15 # 0.05
+BBOX_JITTER_SCALE = 0.20 # 0.10
+AUGMENT_PROB = 0.7
+AUGMENT_MAX_TRANSLATE_X = 5 # 10
+AUGMENT_MAX_TRANSLATE_Y = 5 # 10
+AUGMENT_MAX_ANGLE = 12 # 5
 EMA_DECAY = 0.995
 EMA_RAMPUP_STEPS = 500
 EMA_START_DECAY = 0.90
@@ -148,7 +152,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         print(f"using mirrored data from {opposite_side} side, total training samples: {len(train_dataset)}")
         
     # 資料增強
-    augmented_dataset = ProbAugmentedKeypointDataset(train_dataset, p=0.7, max_translate_x=10, max_translate_y=10, max_angle=5, clamp=True)
+    augmented_dataset = ProbAugmentedKeypointDataset(train_dataset, p=AUGMENT_PROB, max_translate_x=AUGMENT_MAX_TRANSLATE_X, max_translate_y=AUGMENT_MAX_TRANSLATE_Y, max_angle=AUGMENT_MAX_ANGLE, clamp=True) 
     
     # # To visualize the dataset
     # display_image(train_dataset, 0)
@@ -208,7 +212,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     else:
         raise ValueError(f"Unknown head_type: {head_type}")
     
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.05) # 0.01
     
     # param_groups = get_muon_param_groups(model, lr=learning_rate, weight_decay=0.0005)
     # optimizer = MuSGD(
@@ -223,7 +227,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     total_steps = len(train_loader) * epochs
     warmup_steps = max(1, int(0.1 * total_steps))   # 前 10% steps 線性升溫
     base_lr = learning_rate
-    min_lr = 1e-2 * base_lr
+    min_lr = 1e-2 * base_lr # 1e-2
     
     def lr_lambda(step):
         if step < warmup_steps:
@@ -500,4 +504,4 @@ if __name__ == "__main__":
     train(args.data_dir, args.model_name, args.input_size, args.epochs, args.learning_rate,
          args.batch_size, args.side, args.mirror, head_type=args.head_type, split_ratio=args.split_ratio, sigma=args.sigma)
 
-    # python3 train_hip_crop_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name convnext_tiny_fpn1234concat --input_size 224 --epochs 200 --learning_rate 0.0001 --batch_size 64 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 7.0
+    # python3 train_hip_crop_keypoints.py --data_dir Hip-Joint-Keypoint-Detection/data --model_name convnext_tiny_fpn1234concat --input_size 224 --epochs 100 --learning_rate 0.0001 --batch_size 64 --side left --mirror --head_type simcc_2d --split_ratio 3.0 --sigma 4.0

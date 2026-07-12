@@ -259,8 +259,8 @@ if __name__ == "__main__":
 
 """
 python predict_full_image_keypoints.py \
-  --model_name hrnet_w32 \
-  --model_path weights/hrnet_w32_heatmap_sigma4.0_onestage_224_200_0.0001_8_best.pth \
+  --model_name hrnet_w48 \
+  --model_path weights/hrnet_w48_heatmap_sigma4.0_onestage_224_200_0.0002_8_best.pth \
   --data "data/test" \
   --output_dir "results_onestage_mtddh_set"
 """

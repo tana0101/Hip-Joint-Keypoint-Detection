@@ -60,26 +60,62 @@ def get_preds_and_targets(outputs, keypoints, head_type, Nx, Ny, input_size):
 
 def decode_heatmap(heatmaps, input_size):
     """
-    將預測的 2D Heatmap 轉回 (x, y) 座標
+    遵循原版 HRNet 操作的向量化 0.25 像素偏移解碼函數
     heatmaps: [B, K, H_out, W_out]
-    回傳: [B, K, 2] 在 input_size 空間的座標
+    input_size: 224 或 (224, 224)
+    回傳: [B, K, 2] 在 input_size 空間的亞像素座標
     """
     B, K, H_out, W_out = heatmaps.shape
+    device = heatmaps.device
     
-    # 把 H_out * W_out 壓平找最大值的 index
-    heatmaps_flat = heatmaps.view(B, K, -1) # [B, K, H_out*W_out]
-    _, max_indices = torch.max(heatmaps_flat, dim=-1) # [B, K]
+    # 1. 壓平找最大值的 index (與您原本邏輯相同)
+    heatmaps_flat = heatmaps.view(B, K, -1)
+    _, max_indices = torch.max(heatmaps_flat, dim=-1)
     
-    # 將 1D index 轉回 2D 的 (x, y) 座標
     preds_x = (max_indices % W_out).float()
     preds_y = (max_indices // W_out).float()
     
-    # 縮放回 input_size 空間
-    scale_x = input_size / float(W_out)
-    scale_y = input_size / float(H_out)
+    # --- 【原版 HRNet 關鍵新增步驟】0.25 方向性像素偏移 ---
+    # 轉為 Long 型態以利索引
+    px = preds_x.long()
+    py = preds_y.long()
+    
+    # 建立安全邊界遮罩：只有不在圖片最邊緣 (0 或 55) 的點才能去抓上下左右鄰居
+    valid_mask = (px > 0) & (px < W_out - 1) & (py > 0) & (py < H_out - 1)
+    
+    # 將座標限縮在安全範圍內，避免張量索引 (Indexing) 時發生 Out of Bounds 報錯
+    px_safe = px.clamp(1, W_out - 2)
+    py_safe = py.clamp(1, H_out - 2)
+    
+    # 建立對齊形狀的批次索引 [B, K]
+    b_idx = torch.arange(B, device=device).view(B, 1).expand(B, K)
+    k_idx = torch.arange(K, device=device).view(1, K).expand(B, K)
+    
+    # 向量化直接取出上下左右相鄰像素的權重數值
+    val_right = heatmaps[b_idx, k_idx, py_safe, px_safe + 1]
+    val_left  = heatmaps[b_idx, k_idx, py_safe, px_safe - 1]
+    val_down  = heatmaps[b_idx, k_idx, py_safe + 1, px_safe]
+    val_up    = heatmaps[b_idx, k_idx, py_safe - 1, px_safe]
+    
+    # 計算左右與上下差值的正負號 (-1.0, 0.0, 或 +1.0)
+    diff_x = val_right - val_left
+    diff_y = val_down - val_up
+    
+    # 只有在 valid_mask 為 True 時，才乘上 0.25 偏移量
+    shift_x = torch.sign(diff_x) * 0.25 * valid_mask.float()
+    shift_y = torch.sign(diff_y) * 0.25 * valid_mask.float()
+    
+    # 將 0.25 亞像素偏移量加回原本的座標
+    preds_x = preds_x + shift_x
+    preds_y = preds_y + shift_y
+    # --------------------------------------------------
+    
+    # 2. 縮放回 input_size 空間 (與您原本邏輯相同)
+    scale_x = float(input_size[1] if isinstance(input_size, (list, tuple)) else input_size) / float(W_out)
+    scale_y = float(input_size[0] if isinstance(input_size, (list, tuple)) else input_size) / float(H_out)
     
     preds_x = preds_x * scale_x
     preds_y = preds_y * scale_y
     
-    coords = torch.stack([preds_x, preds_y], dim=-1) # [B, K, 2]
+    coords = torch.stack([preds_x, preds_y], dim=-1)
     return coords
