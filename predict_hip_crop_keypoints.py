@@ -1132,7 +1132,7 @@ if __name__ == "__main__":
 """
 python predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_path weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_best.pth \
+  --kp_left_path weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_cropleft_mirror_224_100_0.0001_64_best.pth \
   --yolo_weights weights/yolo26s_mtddh_set.pt \
   --data "data/test" \
   --output_dir "results_mtddh_set" \

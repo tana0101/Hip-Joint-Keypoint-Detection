@@ -7,7 +7,7 @@ def main(args):
     model = YOLO(args.model)
     model.train(
       data=str(data_yaml),
-      epochs=args.epochs, imgsz=args.imgsz, batch=args.batch,
+      epochs=args.epochs, patience=args.patience, imgsz=args.imgsz, batch=args.batch,
       device=args.device, workers=args.workers,
       project=args.project, name=args.name,
       pretrained=args.pretrained, resume=args.resume, seed=args.seed,
@@ -21,6 +21,7 @@ if __name__ == "__main__":
     p.add_argument("--model", default="yolo11n.pt")
     p.add_argument("--data",  default="data/data.yaml")
     p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--patience", type=int, default=50)
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--batch", type=int, default=8)
     p.add_argument("--device", default="")
@@ -44,7 +45,7 @@ if __name__ == "__main__":
 python train_yolo.py \
   --model yolo26s.pt \
   --data data/data.yaml \
-  --epochs 300 --imgsz 640 --batch 32 --device 0 \
+  --epochs 300 --patience 50 --imgsz 640 --batch 32 --device 0 \
   --project runs/train --name yolo26s_mtddh_set --pretrained --seed 42 \
   --fliplr 0.0 --flipud 0.0 --degrees 5.0 \
   --shear 0.0 --perspective 0.0 --mosaic 0.0 --mixup 0.0

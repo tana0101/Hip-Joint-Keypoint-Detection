@@ -2,56 +2,64 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-def generate_target_heatmap(keypoints, heatmap_size, sigma=2.0):
+import torch
+import torch.nn as nn
+
+def generate_target_heatmap_vectorized(keypoints, heatmap_size, sigma=2.0, target_weight=None):
     """
-    keypoints: [B, J, 2] (相對於原圖的絕對座標)
-    heatmap_size: (H, W) 模型輸出的特徵圖大小
-    sigma: 高斯核的標準差
+    零迴圈純向量化高斯熱點圖生成
     """
     B, J, _ = keypoints.shape
     H, W = heatmap_size
     device = keypoints.device
 
-    # 建立網格座標 (確保不帶梯度)
-    y_grid = torch.arange(H, device=device).view(1, 1, H, 1)
-    x_grid = torch.arange(W, device=device).view(1, 1, 1, W)
+    # 1. 建立向量化網格 [1, 1, H, 1] 與 [1, 1, 1, W]
+    y_grid = torch.arange(H, device=device, dtype=torch.float32).view(1, 1, H, 1)
+    x_grid = torch.arange(W, device=device, dtype=torch.float32).view(1, 1, 1, W)
 
-    target_heatmaps = torch.zeros((B, J, H, W), dtype=torch.float32, device=device)
+    # 2. 提取座標並調整形狀以觸發廣播 (Broadcasting)
+    x = keypoints[..., 0].view(B, J, 1, 1)
+    y = keypoints[..., 1].view(B, J, 1, 1)
 
-    kpts_detached = keypoints.detach()
+    # 3. 全批次平行計算高斯分佈
+    dist_sq = (x_grid - x) ** 2 + (y_grid - y) ** 2
+    heatmaps = torch.exp(-dist_sq / (2 * sigma ** 2))
 
-    for b in range(B):
-        for j in range(J):
-            x, y = kpts_detached[b, j, 0], kpts_detached[b, j, 1]
-            
-            if x >= 0 and y >= 0:
-                # 純數值計算高斯
-                target_heatmaps[b, j] = torch.exp(
-                    -((x_grid - x) ** 2 + (y_grid - y) ** 2) / (2 * sigma ** 2)
-                ).squeeze()
+    # 4. 嚴格邊界與可見度遮罩 (排除 (0,0) 補零陷阱)
+    valid_mask = (x > 0) & (y > 0) & (x < W) & (y < H)
+    if target_weight is not None:
+        valid_mask = valid_mask & (target_weight.view(B, J, 1, 1) > 0)
 
-    return target_heatmaps
+    return torch.where(valid_mask, heatmaps, torch.zeros_like(heatmaps))
 
-def compute_loss_heatmap(outputs, keypoints, heatmap_size, input_size, sigma, criterion):
+
+def compute_loss_heatmap(outputs, keypoints, heatmap_size, input_size, sigma, criterion, target_weight=None):
     """
-    計算預測 Heatmap 與 GT Heatmap 的 MSE Loss
+    接收外部傳入的 criterion，兼顧執行效率與 SOTA 梯度放大
     """
-    pred_heatmaps = outputs["heatmaps"] # [B, J, H, W]
+    pred_heatmaps = outputs["heatmaps"]  # [B, J, H, W]
+    B, J, _, _ = pred_heatmaps.shape
     
-    # 將座標依據 heatmap_size 與 input_size 的比例進行縮放
-    B, J = keypoints.shape[0], keypoints.shape[1] // 2
-    kpts = keypoints.view(B, J, 2)
-    
-    scale_x = heatmap_size[1] / input_size
-    scale_y = heatmap_size[0] / input_size
-    
-    scaled_kpts = kpts.clone()
-    scaled_kpts[..., 0] *= scale_x
-    scaled_kpts[..., 1] *= scale_y
+    kpts = keypoints.view(B, J, 2).clone()
 
-    # 生成 GT
-    target_heatmaps = generate_target_heatmap(scaled_kpts, heatmap_size, sigma)
-    
-    # 計算 MSE
+    # --- 座標自動防禦縮放 ---
+    if kpts.max() <= 1.0:
+        kpts[..., 0] *= heatmap_size[1]
+        kpts[..., 1] *= heatmap_size[0]
+    else:
+        scale_x = heatmap_size[1] / float(input_size[1] if isinstance(input_size, (list, tuple)) else input_size)
+        scale_y = heatmap_size[0] / float(input_size[0] if isinstance(input_size, (list, tuple)) else input_size)
+        kpts[..., 0] *= scale_x
+        kpts[..., 1] *= scale_y
+
+    # 生成乾淨的 GT
+    target_heatmaps = generate_target_heatmap_vectorized(kpts, heatmap_size, sigma, target_weight)
+
+    # --- 使用您外部傳入的 criterion 計算 ---
     loss = criterion(pred_heatmaps, target_heatmaps)
+
+    # --- 解決均值 MSE 導致的梯度稀釋 (關鍵修正) ---
+    # 如果您的 criterion 是 MSELoss(reduction='mean')，此係數能喚醒被背景稀釋的梯度
+    loss = loss * (0.5 * J * 100.0)
+
     return loss

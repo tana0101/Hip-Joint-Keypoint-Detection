@@ -417,12 +417,12 @@ python kfold_train_hip_crop_keypoints.py \
   --inner_seed 42 \
   --model_name convnext_tiny_fpn1234concat \
   --input_size 224 \
-  --epochs 200 \
+  --epochs 100 \
   --learning_rate 0.0001 \
   --batch_size 64 \
   --side left \
   --mirror \
   --head_type simcc_2d \
   --split_ratio 3.0 \
-  --sigma 7.0
+  --sigma 4.0
 '''

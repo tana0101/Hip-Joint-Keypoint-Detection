@@ -3,9 +3,11 @@ import shutil
 import json
 from pathlib import Path
 from typing import List
+from sklearn.model_selection import train_test_split
 
 # 改腳本用於從 JSON 分割檔（dataset_splits.json）將資料集切分成 train/val/test，並產生 Ultralytics 相容的 data.yaml。
-# 為了能符合 MTDDH 的原始訓練方式。
+# 依照兩階段模型訓練需求，將 JSON 的 train pool 再切分 90% (inner train) / 10% (inner val)，
+# 將原本的 val 獨立作為 test (SOTA測試集)。
 
 def list_files_by_stem(folder: Path, exts):
     """
@@ -67,16 +69,16 @@ def write_data_yaml(out_base: Path, names_dict: dict) -> None:
     yaml_lines.append("")
     (out_base / "data.yaml").write_text("\n".join(yaml_lines), encoding="utf-8")
 
-def main(dataset: str, splits_file: str, out: str = "data", overwrite: bool = False):
-    dataset_dir = Path(dataset)
+def main(args):
+    dataset_dir = Path(args.dataset)
     assert dataset_dir.exists(), f"找不到資料夾：{dataset_dir}"
 
-    splits_path = Path(splits_file)
+    splits_path = Path(args.splits)
     assert splits_path.exists(), f"找不到 JSON 分割檔：{splits_path}"
 
-    out_base = Path(out)
+    out_base = Path(args.out)
     if out_base.exists():
-        if overwrite:
+        if args.overwrite:
             print(f"[INFO] 輸出資料夾 {out_base} 已存在，將被刪除後重建。")
             shutil.rmtree(out_base)
         else:
@@ -127,22 +129,29 @@ def main(dataset: str, splits_file: str, out: str = "data", overwrite: bool = Fa
     for modal in present_modalities:
         common_stems &= set(stem_maps[modal].keys())
 
-    # 篩選存在於實際資料夾中的 JSON 名單
-    train_stems = [s for s in json_train if s in common_stems]
-    val_stems = [s for s in json_val if s in common_stems]
+    # 篩選存在於實際資料夾中的 JSON 名單 (加入 sorted 防止 Order Trap)
+    train_pool_stems = sorted([s for s in json_train if s in common_stems])
     
-    # 將 val 名單複製給 test
-    test_stems = val_stems.copy()
+    # 原本的 JSON val，現在正式成為獨立的 Outer Test
+    test_stems = sorted([s for s in json_val if s in common_stems])
+    
+    # 從 train pool 中再切分出 inner train 與 inner val
+    train_stems, val_stems = train_test_split(
+        train_pool_stems,
+        test_size=args.val_ratio,
+        random_state=args.seed,
+        shuffle=True
+    )
 
     # 檢查是否有在 JSON 內但實際檔案缺失的情況
-    missing_train = set(json_train) - set(train_stems)
-    missing_val = set(json_val) - set(val_stems)
+    missing_train = set(json_train) - set(train_pool_stems)
+    missing_val = set(json_val) - set(test_stems)
     if missing_train:
         print(f"[WARN] JSON 中的 train 檔案遺失或資料不齊全：{len(missing_train)} 筆")
     if missing_val:
         print(f"[WARN] JSON 中的 val 檔案遺失或資料不齊全：{len(missing_val)} 筆")
 
-    out_base = Path(out)
+    out_base = Path(args.out)
     for split in ["train", "val", "test"]:
         make_dirs_for_split(out_base, split, present_modalities, out_name_map)
 
@@ -154,10 +163,13 @@ def main(dataset: str, splits_file: str, out: str = "data", overwrite: bool = Fa
             shutil.copy2(src, dst)
 
     # 執行複製
+    print("[INFO] 正在複製 train 檔案...")
     for stem in train_stems:
         copy_one(stem, "train")
+    print("[INFO] 正在複製 val 檔案...")
     for stem in val_stems:
         copy_one(stem, "val")
+    print("[INFO] 正在複製 test 檔案...")
     for stem in test_stems:
         copy_one(stem, "test")
 
@@ -169,35 +181,38 @@ def main(dataset: str, splits_file: str, out: str = "data", overwrite: bool = Fa
     write_data_yaml(out_base, names_dict)
 
     # 總結
-    print("=== Split Summary ===")
-    print(f"Dataset root     : {dataset_dir}")
-    print(f"Splits JSON      : {splits_path}")
-    print(f"Output root      : {out_base}")
+    print("\n=== Split Summary ===")
+    print(f"Dataset root      : {dataset_dir}")
+    print(f"Splits JSON       : {splits_path}")
+    print(f"Output root       : {out_base}")
+    print(f"Random Seed       : {args.seed}")
     print(f"Present modalities: {present_modalities}（輸出時 yolo_labels -> labels）")
-    print(f"  -> train: {len(train_stems)}")
-    print(f"  -> val  : {len(val_stems)}")
-    print(f"  -> test : {len(test_stems)} (Copied from val)")
+    print("-" * 30)
+    print(f"  -> Train Pool (JSON Train) : {len(train_pool_stems)}")
+    print(f"       ├─ inner train ({100 - args.val_ratio * 100:.0f}%)  : {len(train_stems)}")
+    print(f"       └─ inner val   ({args.val_ratio * 100:.0f}%)  : {len(val_stems)}")
+    print(f"  -> Outer Test (JSON Val)   : {len(test_stems)}")
+    print("-" * 30)
     print(f"[OK] 已產生 {out_base / 'data.yaml'}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Split dataset using a JSON file and emit Ultralytics data.yaml")
-    parser.add_argument("--dataset", required=True, help="Root directory of the dataset, e.g., dataset/xray_IHDI_5")
+    parser = argparse.ArgumentParser(description="Split dataset using a JSON file and emit Ultralytics data.yaml with inner validation split")
+    parser.add_argument("--dataset", required=True, help="Root directory of the dataset, e.g., dataset/mtddh_xray_2d")
     parser.add_argument("--splits", required=True, help="Path to the dataset_splits.json file")
     parser.add_argument("--out", default="data", help="Output root directory (default: data)")
     parser.add_argument("--overwrite", action="store_true", help="If set, removes the existing output directory before splitting")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for inner split")
+    parser.add_argument("--val_ratio", type=float, default=0.1, help="Ratio of inner validation split from train pool")
     args = parser.parse_args()
 
-    main(
-        dataset=args.dataset,
-        splits_file=args.splits,
-        out=args.out,
-        overwrite=args.overwrite
-    )
+    main(args)
     
-"""
+'''
 python split_from_json.py \
---dataset dataset/mtddh_xray_2d \
---splits dataset/mtddh_xray_2d/dataset_splits.json \
---out data \
---overwrite
-"""
+  --dataset dataset/mtddh_xray_2d \
+  --splits dataset/mtddh_xray_2d/dataset_splits.json \
+  --out data \
+  --overwrite \
+  --seed 42 \
+  --val_ratio 0.1
+'''
