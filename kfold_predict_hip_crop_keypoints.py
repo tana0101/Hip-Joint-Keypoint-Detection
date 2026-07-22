@@ -8,11 +8,14 @@ from predict_hip_crop_keypoints import (
     extract_info_from_model_path,
     compute_and_save_confusion_matrices_with_metrics,
     plot_ai_angle_scatter,
+    plot_ai_angle_bland_altman,
     plot_pixel_vs_angle_error,
     plot_error_histogram_with_shapiro,
     plot_avg_distances, 
     plot_ai_angle_errors,
 )
+
+# from predict_full_image_keypoints import predict_onestage
 
 def main():
     parser = argparse.ArgumentParser(description="K-fold test for hip crop keypoints.")
@@ -225,7 +228,7 @@ def main():
     
     # 若合併後的樣本數很多，可以視情況調大 tick_step_val (例如 50 或 100)
     tick_step_val = 50 
-    dpi = 300  # 圖片解析度
+    dpi = 512  # 圖片解析度
 
     # 1.5) 繪製平均距離圖 (All folds)
     mu_dist_all, std_dist_all = plot_avg_distances(
@@ -283,6 +286,13 @@ def main():
         save_path=scatter_overall_path,
     )
     
+    plot_ai_angle_bland_altman(
+        ai_gt_all,
+        ai_pred_all,
+        side="Overall (All folds)",
+        save_path=os.path.join(all_folds_summary_dir, "bland_altman_overall_ai_angle.png"),
+    )
+    
     # ---- 5) 誤差分佈直方圖與 Shapiro-Wilk 檢定
     signed_errors_left_all = np.asarray(all_ai_left_pred, dtype=float) - np.asarray(all_ai_left_gt, dtype=float)
     signed_errors_right_all = np.asarray(all_ai_right_pred, dtype=float) - np.asarray(all_ai_right_gt, dtype=float)
@@ -321,7 +331,7 @@ if __name__ == "__main__":
 """
 python kfold_predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_cropleft_mirror_224_100_0.0001_64_fold{fold}_best.pth" \
+  --kp_left_tpl "results_nckuh_kfold/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
   --yolo_weights weights/yolo26s_kfold_nckuh_fold{fold}.pt \
   --data_root data \
   --k 5 \
@@ -331,11 +341,11 @@ python kfold_predict_hip_crop_keypoints.py \
 """
 python kfold_predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_tpl "results_mtddh訓練/results_kfold_新版統計資料/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma7.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
+  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
   --yolo_weights weights/yolo26s_kfold_mtddh_fold{fold}.pt \
   --data_root data \
   --k 5 \
-  --output_root results_kfold
+  --output_root results_kfold_mtddh
 """
 
 """
@@ -345,6 +355,16 @@ python kfold_predict_hip_crop_keypoints.py \
   --yolo_weights weights/yolo26s_kfold_mtddh_fold{fold}.pt \
   --data_root data \
   --k 5 \
-  --output_root results_kfold_mtddh \
+  --output_root results_kfold_mtddh_wo_decoder
+"""
+
+"""
+python kfold_predict_hip_crop_keypoints.py \
+  --model_name convnext_tiny_fpn1234concat \
+  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_onestage_384_200_0.0001_32_fold{fold}_best.pth" \
+  --yolo_weights weights/yolo26s_kfold_mtddh_fold{fold}.pt \
+  --data_root data \
+  --k 5 \
+  --output_root results_kfold_onestage_mtddh \
   --model_points 8
 """
