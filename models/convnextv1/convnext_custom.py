@@ -10,12 +10,12 @@ class ConvNeXtTinyCustom(nn.Module):
                  Nx=None, Ny=None):
         super().__init__()
 
-        # 原本 backbone
-        model = convnext_block_custom.ConvNeXt(
-            depths=[3, 3, 9, 3],
-            dims=[96, 192, 384, 768],
-            # block_cls=convnext_block_custom.Block
-        )
+        # model = convnext_block_custom.ConvNeXt(
+        #     depths=[3, 3, 9, 3],
+        #     dims=[96, 192, 384, 768],
+        #     # block_cls=convnext_block_custom.Block
+        # )
+        model = convnext_block_custom.convnext_tiny(pretrained=True)
 
         url = convnext_block_custom.model_urls['convnext_tiny_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
@@ -113,7 +113,7 @@ class ConvNextTinyMS(nn.Module):
             mode="fpn",              # fpn, multi_gap, cls 三種模式
             fpn_levels=(0, 1, 2, 3),    # 使用 stage1, stage2, stage3, stage4 的特徵圖
             fpn_out_channels=256,    # FPN 中間層維度
-            fpn_fuse_type="concat",  # FPN 特徵融合方式：concat 或 sum(最上層的map)
+            fpn_fuse_type="concat",  # FPN 特徵融合方式：concat 或 sum(最上層的map) *其實sum比較好
         )
 
         # 2) 用 dummy 推出 body 輸出的 feature map size

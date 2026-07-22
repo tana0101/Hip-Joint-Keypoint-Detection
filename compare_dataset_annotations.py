@@ -14,6 +14,7 @@ from predict_hip_crop_keypoints import (
     plot_error_histogram_with_shapiro,
     compute_and_save_confusion_matrices_with_metrics,
     plot_ai_angle_scatter,
+    plot_ai_angle_bland_altman,
     plot_pixel_vs_angle_error
 )
 from utils.hip_geometry import (
@@ -115,12 +116,15 @@ def main(args):
     image_indices = np.arange(1, len(metrics['names']) + 1)
     tick_step_val = max(1, len(metrics['names']) // 10)
     
+    dpi = 512
+    
     # 1. Avg Distance Bar Chart
     plot_avg_distances(
         image_labels=image_indices,
         all_avg_distances=metrics['avg_dists'],
         result_dir=out_dir,
         tick_step=tick_step_val,
+        dpi=dpi
     )
     
     # 2. Avg AI Angle Error Bar Chart
@@ -130,7 +134,8 @@ def main(args):
         ai_errors_right=metrics['ai_diff_r'],
         result_dir=out_dir,
         tick_step=tick_step_val,
-        bar_width=0.2
+        bar_width=0.2,
+        dpi=dpi
     )
     
     # 3. 誤差分佈直方圖與 Shapiro-Wilk 檢定 (這會取代你原本的 AI Error Histogram)
@@ -160,6 +165,14 @@ def main(args):
         pred_list=all_a, 
         side="Overall", 
         save_path=os.path.join(out_dir, "scatter_ai_all.png"),
+        label_pred=label_a_name,
+        label_gt=label_b_name
+    )
+    plot_ai_angle_bland_altman(
+        gt_list=all_b,
+        pred_list=all_a,
+        side="Overall",
+        save_path=os.path.join(out_dir, "bland_altman_ai_all.png"),
         label_pred=label_a_name,
         label_gt=label_b_name
     )

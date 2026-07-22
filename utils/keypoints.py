@@ -1,4 +1,5 @@
 from utils.simcc import decode_simcc_expectation_to_xy as decode_simcc_to_xy
+# from utils.simcc import decode_simcc_heuristic_to_xy as decode_simcc_to_xy
 import torch
 
 # predicted coordinates from model outputs

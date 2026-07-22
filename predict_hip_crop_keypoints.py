@@ -453,7 +453,7 @@ def compute_and_save_confusion_matrices_with_metrics(
         cm_norm_4 = confusion_matrix(v_gts, v_preds, labels=labels_4class, normalize='true')
         
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        fig.suptitle(f'{title} (4-Class)\nAcc: {acc_4:.2%} | Macro F1: {f1_mac:.2%} | QWK: {wk:.3f} | Kendall: {kt:.3f}', fontsize=14)
+        fig.suptitle(f'{title} (4-Class)\nAcc: {acc_4:.2%} | Precision: {p_mac:.2%} | Recall: {r_mac:.2%} | Macro F1: {f1_mac:.2%}\nQWK: {wk:.3f} | Kendall: {kt:.3f}', fontsize=14)
         
         sns.heatmap(cm_4, annot=True, fmt='d', cmap=cmap, ax=axes[0], xticklabels=labels_4class, yticklabels=labels_4class)
         axes[0].set_title('Counts')
@@ -502,7 +502,7 @@ def compute_and_save_confusion_matrices_with_metrics(
         cm_norm_2 = confusion_matrix(bin_gts, bin_preds, labels=[0, 1], normalize='true')
         
         fig2, axes2 = plt.subplots(1, 2, figsize=(10, 4.5))
-        fig2.suptitle(f'{title} (Screening: I vs II-IV)\nAcc: {acc_bin:.2%} | Sens: {sens:.2%} | Spec: {spec:.2%}', fontsize=14)
+        fig2.suptitle(f'{title} (Screening: I vs II-IV)\nAcc: {acc_bin:.2%} | Sens: {sens:.2%} | Spec: {spec:.2%} | PPV: {ppv:.2%} | NPV: {npv:.2%} | F1: {f1_bin:.2%}', fontsize=14)
         
         # 為了區分，二元分類改用熱力圖顏色稍微不同的色系 (加一點透明度或選用不同 colormap，這裡沿用但標籤不同)
         sns.heatmap(cm_2, annot=True, fmt='d', cmap='Oranges', ax=axes2[0], xticklabels=labels_2class, yticklabels=labels_2class)
@@ -763,6 +763,80 @@ def plot_ai_angle_scatter(
         f"wilcoxon_pval_{prefix}": w_pval # 紀錄 Wilcoxon p-value
     }
 
+def plot_ai_angle_bland_altman(
+    gt_list, pred_list, side, save_path=None,
+    label_pred="Predicted", label_gt="Ground Truth",
+    xlim=(5, 40), ylim=(-14, 14)  # 強制設定預設的統一視覺尺度
+):
+    x = np.array(gt_list)
+    y = np.array(pred_list)
+
+    # 資料點不足時跳過
+    if len(x) <= 1:
+        prefix = side.lower()
+        return {f"bias_{prefix}": 0, f"loa_upper_{prefix}": 0, f"loa_lower_{prefix}": 0, f"sd_{prefix}": 0}
+
+    # 1. 計算 Bland-Altman 核心數據
+    mean_val = (x + y) / 2.0
+    diff = y - x  # Predict - Ground Truth
+    
+    bias = np.mean(diff)
+    sd = np.std(diff, ddof=1)
+    
+    loa_upper = bias + 1.96 * sd
+    loa_lower = bias - 1.96 * sd
+
+    # 2. 開始繪圖
+    plt.figure(figsize=(8, 6))
+    
+    # 畫散點
+    plt.scatter(mean_val, diff, c='blue', alpha=0.5, edgecolors='none', label='Differences')
+    
+    # 畫參考線：0 基準線、Bias 線、LoA 上下限
+    plt.axhline(0, color='gray', linestyle=':', lw=1.5, label='Zero Line (No Difference)')
+    plt.axhline(bias, color='red', linestyle='-', lw=2, label=f'Mean Bias: {bias:.2f}°')
+    plt.axhline(loa_upper, color='green', linestyle='--', lw=1.5, label=f'+1.96 SD: {loa_upper:.2f}°')
+    plt.axhline(loa_lower, color='green', linestyle='--', lw=1.5, label=f'-1.96 SD: {loa_lower:.2f}°')
+
+    # 3. 強制統一視覺尺度
+    if xlim:
+        plt.xlim(xlim)
+    if ylim:
+        plt.ylim(ylim)
+
+    # 4. 在圖表右側外緣標註數值 (使用 yaxis_transform 確保 X 絕對貼在圖表右緣，Y 跟隨數據)
+    trans = plt.gca().get_yaxis_transform()
+    plt.text(1.02, bias, f'Mean: {bias:.2f}°', va='center', ha='left', color='red', fontweight='bold', transform=trans, clip_on=False)
+    plt.text(1.02, loa_upper, f'+1.96 SD: {loa_upper:.2f}°', va='center', ha='left', color='green', fontweight='bold', transform=trans, clip_on=False)
+    plt.text(1.02, loa_lower, f'-1.96 SD: {loa_lower:.2f}°', va='center', ha='left', color='green', fontweight='bold', transform=trans, clip_on=False)
+
+    # 設定標題與軸標籤
+    plt.title(
+        f"{side} AI Angle Bland-Altman Plot\n"
+        f"Bias = {bias:.2f}°, 95% LoA = [{loa_lower:.2f}°, {loa_upper:.2f}°]"
+    )
+    plt.xlabel(f"Mean of {label_gt} and {label_pred} (°)")
+    plt.ylabel(f"Difference ({label_pred} - {label_gt}) (°)")
+    
+    plt.legend(loc='upper left')
+    plt.grid(True, linestyle='--', alpha=0.5)
+    
+    # 使用 bbox_inches='tight' 確保右側標註的文字不會在存檔時被裁掉
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.tight_layout()
+        plt.show()
+
+    prefix = side.lower()
+    return {
+        f"bias_{prefix}": bias,
+        f"loa_upper_{prefix}": loa_upper,
+        f"loa_lower_{prefix}": loa_lower,
+        f"sd_{prefix}": sd
+    }
+    
 def plot_pixel_vs_angle_error(
     pixel_errors, ai_errors_avg, save_path=None,
     x_label="Avg Pixel Distance Error",          
@@ -1052,6 +1126,10 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     ai_right_metrics = plot_ai_angle_scatter(ai_right_gt_list, ai_right_pred_list, 'Right', os.path.join(result_dir, "scatter_ai_right.png"))
     ai_all_metrics = plot_ai_angle_scatter(ai_gt_all, ai_pred_all, 'All', os.path.join(result_dir, "scatter_ai_all.png"))
     
+    ai_left_bland_metrics = plot_ai_angle_bland_altman(ai_left_gt_list, ai_left_pred_list, 'Left', os.path.join(result_dir, "bland_altman_ai_left.png"))
+    ai_right_bland_metrics = plot_ai_angle_bland_altman(ai_right_gt_list, ai_right_pred_list, 'Right', os.path.join(result_dir, "bland_altman_ai_right.png"))
+    ai_all_bland_metrics = plot_ai_angle_bland_altman(ai_gt_all, ai_pred_all, 'All', os.path.join(result_dir, "bland_altman_ai_all.png"))
+    
     # -------------------------------------------------------------
     # 5-5. Pixel vs. Angle Error Scatter Plot
     # -------------------------------------------------------------
@@ -1099,6 +1177,9 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     metrics.update(ai_left_metrics)
     metrics.update(ai_right_metrics)
     metrics.update(ai_all_metrics)
+    metrics.update(ai_left_bland_metrics)
+    metrics.update(ai_right_bland_metrics)
+    metrics.update(ai_all_bland_metrics)
     metrics.update(pixel_vs_angle_metrics)
     return metrics
 

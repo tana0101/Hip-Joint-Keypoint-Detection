@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from train_hip_crop_keypoints import train, LOGS_DIR
+# from train_full_image_keypoints import train, LOGS_DIR
 from utils.train_vis import plot_training_progress
 
 def list_images(img_dir: Path, exts: List[str]) -> List[Path]:
@@ -408,7 +409,7 @@ def main():
 if __name__ == "__main__":
     main()
     
-'''
+''' two stage
 python kfold_train_hip_crop_keypoints.py \
   --data_root data \
   --k 5 \
@@ -417,11 +418,28 @@ python kfold_train_hip_crop_keypoints.py \
   --inner_seed 42 \
   --model_name convnext_tiny_fpn1234concat \
   --input_size 224 \
-  --epochs 100 \
+  --epochs 200 \
   --learning_rate 0.0001 \
   --batch_size 64 \
   --side left \
   --mirror \
+  --head_type simcc_2d \
+  --split_ratio 3.0 \
+  --sigma 4.0
+'''
+
+''' one stage
+python kfold_train_hip_crop_keypoints.py \
+  --data_root data \
+  --k 5 \
+  --mode outer_inner \
+  --inner_val_ratio 0.1 \
+  --inner_seed 42 \
+  --model_name convnext_tiny_fpn1234concat \
+  --input_size 384 \
+  --epochs 200 \
+  --learning_rate 0.0001 \
+  --batch_size 32 \
   --head_type simcc_2d \
   --split_ratio 3.0 \
   --sigma 4.0
