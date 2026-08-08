@@ -193,7 +193,8 @@ def main():
     parser.add_argument("--side", type=str, default="left", choices=["left", "right"])
     parser.add_argument("--mirror", action="store_true")
     parser.add_argument("--head_type", type=str, default="direct_regression",
-                        choices=["direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv"])
+                        choices=["direct_regression", "simcc_1d", "simcc_2d", "simcc_2d_deconv", "heatmap"],
+                        help="keypoint head type: direct_regression, simcc_1d, simcc_2d, simcc_2d_deconv, heatmap")
     parser.add_argument("--split_ratio", type=float, default=2.0,
                         help="SimCC 的 sr 參數，用在 head_type 為 simcc* 時")
     parser.add_argument("--sigma", type=float, default=6.0,
@@ -425,6 +426,22 @@ python kfold_train_hip_crop_keypoints.py \
   --mirror \
   --head_type simcc_2d \
   --split_ratio 3.0 \
+  --sigma 4.0
+  
+python kfold_train_hip_crop_keypoints.py \
+  --data_root data \
+  --k 5 \
+  --mode outer_inner \
+  --inner_val_ratio 0.1 \
+  --inner_seed 42 \
+  --model_name convnext_tiny_fpn1234concat \
+  --input_size 224 \
+  --epochs 200 \
+  --learning_rate 0.0001 \
+  --batch_size 16 \
+  --side left \
+  --mirror \
+  --head_type heatmap \
   --sigma 4.0
 '''
 
