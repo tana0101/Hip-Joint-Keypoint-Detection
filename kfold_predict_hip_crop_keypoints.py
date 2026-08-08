@@ -351,11 +351,11 @@ python kfold_predict_hip_crop_keypoints.py \
 """
 python kfold_predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_cropleft_mirror_224_100_0.0001_64_fold{fold}_best.pth" \
+  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_heatmap_sigma4.0_cropleft_mirror_224_200_0.0001_16_fold{fold}_best.pth" \
   --yolo_weights weights/yolo26s_kfold_mtddh_fold{fold}.pt \
   --data_root data \
   --k 5 \
-  --output_root results_kfold_mtddh_wo_decoder
+  --output_root results_kfold_mtddh_wo_simcc_h
 """
 
 """
