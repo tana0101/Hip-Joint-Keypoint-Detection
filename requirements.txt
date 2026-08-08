@@ -10,3 +10,4 @@ scipy
 ultralytics==8.4.7
 tensorboard
 seaborn==0.13.2
+fvcore
