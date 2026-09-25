@@ -31,20 +31,7 @@ from utils.ema import ModelEMA
 from models.model import initialize_model
 from pathlib import Path
 
-LOGS_DIR = "logs"
-MODELS_DIR = "weights"
-BBOX_JITTER = True
-BBOX_EXPAND = 0.05
-BBOX_JITTER_PROB = 0.7
-BBOX_JITTER_CENTER = 0.15 # 0.05
-BBOX_JITTER_SCALE = 0.20 # 0.10
-AUGMENT_PROB = 0.7
-AUGMENT_MAX_TRANSLATE_X = 5 # 10
-AUGMENT_MAX_TRANSLATE_Y = 5 # 10
-AUGMENT_MAX_ANGLE = 12 # 5
-EMA_DECAY = 0.995
-EMA_RAMPUP_STEPS = 500
-EMA_START_DECAY = 0.90
+from config import Paths, EMA, Augment, YOLOConfig
 
 # For reproducibility in DataLoader workers
 def seed_worker(worker_id):
@@ -97,10 +84,10 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         detections_dir = data_dir / 'train' / 'detections',
         side=side,
         transform=transform,
-        crop_expand=BBOX_EXPAND,
+        crop_expand=YOLOConfig.BBOX_EXPAND,
         keep_square=True,
         input_size=input_size,
-        bbox_jitter=BBOX_JITTER, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
+        bbox_jitter=Augment.BBOX_JITTER, jitter_center=Augment.BBOX_JITTER_CENTER, jitter_scale=Augment.BBOX_JITTER_SCALE, jitter_prob=Augment.BBOX_JITTER_PROB
     )
     val_dataset = HipCropKeypointDataset(
         img_dir = data_dir / 'val' / 'images',
@@ -108,7 +95,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         detections_dir = data_dir / 'val' / 'detections',
         side=side,
         transform=transform,
-        crop_expand=BBOX_EXPAND,
+        crop_expand=YOLOConfig.BBOX_EXPAND,
         keep_square=True,
         input_size=input_size,
         bbox_jitter=False
@@ -127,10 +114,10 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
             detections_dir=data_dir / 'train' / 'detections',
             side=opposite_side,
             transform=transform,
-            crop_expand=BBOX_EXPAND,
+            crop_expand=YOLOConfig.BBOX_EXPAND,
             keep_square=True,
             input_size=input_size,
-            bbox_jitter=BBOX_JITTER, jitter_center=BBOX_JITTER_CENTER, jitter_scale=BBOX_JITTER_SCALE, jitter_prob=BBOX_JITTER_PROB
+            bbox_jitter=Augment.BBOX_JITTER, jitter_center=Augment.BBOX_JITTER_CENTER, jitter_scale=Augment.BBOX_JITTER_SCALE, jitter_prob=Augment.BBOX_JITTER_PROB
         )
         opposite_val_dataset = HipCropKeypointDataset(
             img_dir=data_dir / 'val' / 'images',
@@ -138,7 +125,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
             detections_dir=data_dir / 'val' / 'detections',
             side=opposite_side,
             transform=transform,
-            crop_expand=BBOX_EXPAND,
+            crop_expand=YOLOConfig.BBOX_EXPAND,
             keep_square=True,
             input_size=input_size,
             bbox_jitter=False
@@ -152,7 +139,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         print(f"using mirrored data from {opposite_side} side, total training samples: {len(train_dataset)}")
         
     # 資料增強
-    augmented_dataset = ProbAugmentedKeypointDataset(train_dataset, p=AUGMENT_PROB, max_translate_x=AUGMENT_MAX_TRANSLATE_X, max_translate_y=AUGMENT_MAX_TRANSLATE_Y, max_angle=AUGMENT_MAX_ANGLE, clamp=True) 
+    augmented_dataset = ProbAugmentedKeypointDataset(train_dataset, p=Augment.PROB, max_translate_x=Augment.MAX_TRANSLATE_X, max_translate_y=Augment.MAX_TRANSLATE_Y, max_angle=Augment.MAX_ANGLE, clamp=True) 
     
     # # To visualize the dataset
     # display_image(train_dataset, 0)
@@ -242,10 +229,10 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     # Initialize EMA
     ema = ModelEMA(
         model,
-        target_decay=EMA_DECAY,
+        target_decay=EMA.DECAY,
         device=device,
-        rampup_steps=EMA_RAMPUP_STEPS,
-        start_decay=EMA_START_DECAY,
+        rampup_steps=EMA.RAMPUP_STEPS,
+        start_decay=EMA.START_DECAY,
     )
     
     # Save the model's training progress
@@ -271,7 +258,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         exp_name += f"_fold{fold_index}"
     
     run_name = exp_name
-    tb_dir = os.path.join(LOGS_DIR, "tb", run_name)
+    tb_dir = os.path.join(Paths.LOGS_DIR, "tb", run_name)
     writer = SummaryWriter(log_dir=tb_dir)
     try:
         dummy = torch.randn(1, 3, input_size, input_size, device=device)
@@ -400,12 +387,12 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
         writer.add_scalar("opt/lr", optimizer.param_groups[0]['lr'], epoch)
         
     # Save the training and validation progress
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs(Paths.LOGS_DIR, exist_ok=True)
+    os.makedirs(Paths.MODELS_DIR, exist_ok=True)
     
     # Save the best model (with the lowest validation loss)
     if best_model_state:
-        model_path = os.path.join(MODELS_DIR, f"{exp_name}_best.pth")
+        model_path = os.path.join(Paths.MODELS_DIR, f"{exp_name}_best.pth")
         torch.save(best_model_state, model_path)
         print(f"Best model saved to: {model_path}")
 
@@ -453,13 +440,13 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, s
     )
 
     # Save the training plot
-    training_plot_path = os.path.join(LOGS_DIR, f"{exp_name}_training_plot.png")
+    training_plot_path = os.path.join(Paths.LOGS_DIR, f"{exp_name}_training_plot.png")
     plt.savefig(training_plot_path)
     print(f"Training plot saved to: {training_plot_path}")
     plt.show()
 
     # Save the Loss, NME, and Pixel Error to a text file
-    training_log_path = os.path.join(LOGS_DIR, f"{exp_name}_training_log.txt")
+    training_log_path = os.path.join(Paths.LOGS_DIR, f"{exp_name}_training_log.txt")
     with open(training_log_path, "w") as f:
         for epoch, (loss, nme, pixel_error, val_loss, val_nme, val_pixel_error) in enumerate(
                 zip(epoch_losses, epoch_nmes, epoch_pixel_errors, val_losses, val_nmes, val_pixel_errors), 1):

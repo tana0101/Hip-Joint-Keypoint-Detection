@@ -21,8 +21,7 @@ from predict_hip_crop_keypoints import (
     plot_error_histogram_with_shapiro,
     compute_and_save_confusion_matrices_with_metrics,
     plot_ai_angle_scatter,
-    plot_pixel_vs_angle_error,
-    PIX_TH, ANG_TH
+    plot_pixel_vs_angle_error
 )
 
 # 引入幾何計算
@@ -31,6 +30,8 @@ from utils.hip_geometry import (
     classify_quadrant_ihdi,
     unify_keypoints_format
 )
+
+from config import Eval
 
 def predict_onestage(model_name, model_path, data_dir, output_dir, fold_index=None, model_points=None):
     
@@ -165,8 +166,8 @@ def predict_onestage(model_name, model_path, data_dir, output_dir, fold_index=No
         pix_l, pix_r = np.mean(point_dists[:mid]), np.mean(point_dists[mid:])
         err_ail, err_air = abs(ail_p - ail_g), abs(air_p - air_g)
         
-        is_pix = (pix_l > PIX_TH or pix_r > PIX_TH)
-        is_ang = (err_ail > ANG_TH or err_air > ANG_TH)
+        is_pix = (pix_l > Eval.PIX_TH or pix_r > Eval.PIX_TH)
+        is_ang = (err_ail > Eval.ANG_TH or err_air > Eval.ANG_TH)
         
         if is_pix:
             reason = f"{fname} L_pix:{pix_l:.2f} R_pix:{pix_r:.2f}"

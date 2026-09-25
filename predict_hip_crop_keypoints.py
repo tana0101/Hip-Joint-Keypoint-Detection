@@ -18,7 +18,6 @@ from sklearn.metrics import (
 from scipy.stats import pearsonr, spearmanr, kendalltau, ttest_rel, mannwhitneyu, wilcoxon, shapiro, pointbiserialr
 from ultralytics import YOLO
 
-from datasets.hip_crop_keypoints import DATASET_CONFIGS_BY_COUNT # 鏡像重排
 from datasets.transforms import get_hip_base_transform
 from utils.detection import _detect_one, _square_expand_clip
 from utils.keypoints import get_pred_coords
@@ -37,26 +36,7 @@ from utils.hip_geometry import (
 from utils.plots import add_sigma_guides, add_zscore_right_axis
 from utils.evaluation import extract_info_from_model_path
 from collections import OrderedDict
-
-YOLO_LEFT_CLS  = 0
-YOLO_RIGHT_CLS = 1
-YOLO_CONF      = 0.001
-YOLO_IOU       = 0.7
-BBOX_EXPAND    = 0.05
-
-DISTANCE_BINS = [
-    (0.0, 2.5,   "0-2.5"),
-    (2.5, 5.0,   "2.5-5"),
-    (5.0, 7.5,   "5-7.5"),
-    (7.5, 10.0,  "7.5-10"),
-    (10.0, 12.5, "10-12.5"),
-    (12.5, 15.0, "12.5-15"),
-    (15.0, np.inf,"15+"),
-]
-
-# outlier thresholds
-PIX_TH = 10.0     # pixel distance threshold
-ANG_TH = 8.0      # degree threshold
+from config import YOLOConfig, Eval, Dataset as DataConfig
 
 # 如果需要以ground truth box為基準裁切，可以用這個函式從 det json 讀取
 def _load_box_from_det_json(det_path, label):
@@ -99,7 +79,7 @@ def _load_box_from_det_json(det_path, label):
 def build_distance_ranges(result_dir):
     """依據 DISTANCE_BINS 建立對應的資料夾 dict。"""
     distance_ranges = {}
-    for _, _, label in DISTANCE_BINS:
+    for _, _, label in Eval.DISTANCE_BINS:
         path = os.path.join(result_dir, label)
         os.makedirs(path, exist_ok=True)
         distance_ranges[label] = path
@@ -107,7 +87,7 @@ def build_distance_ranges(result_dir):
 
 def choose_distance_subfolder(avg_distance, distance_ranges):
     """根據 avg_distance 找到對應的區間資料夾。"""
-    for lo, hi, label in DISTANCE_BINS:
+    for lo, hi, label in Eval.DISTANCE_BINS:
         # 最後一個是 (15.0, inf, "15+")，用 >= lo 即可
         if np.isinf(hi):
             if avg_distance >= lo:
@@ -116,7 +96,7 @@ def choose_distance_subfolder(avg_distance, distance_ranges):
             if lo <= avg_distance < hi:
                 return distance_ranges[label]
     # 理論上不會走到這裡，保險起見 fallback 到最後一個 bin
-    return distance_ranges[DISTANCE_BINS[-1][2]]
+    return distance_ranges[Eval.DISTANCE_BINS[-1][2]]
 
 def _infer_side_kp(
     kp_model,
@@ -166,7 +146,7 @@ def _hflip_kpts(kpts, input_size):
 def _reorder_between_sides(kpts, from_side, to_side):
     """
     左↔右的單側點索引重排。
-    直接查閱 DATASET_CONFIGS_BY_COUNT，實現單一維護。
+    直接查閱 DataConfig.CONFIGS_BY_COUNT，實現單一維護。
     """
     if from_side == to_side:
         return kpts
@@ -175,9 +155,9 @@ def _reorder_between_sides(kpts, from_side, to_side):
     num_crop_points = kpts.shape[0]
     total_points = num_crop_points * 2
     
-    if total_points in DATASET_CONFIGS_BY_COUNT:
+    if total_points in DataConfig.CONFIGS_BY_COUNT:
         # 從配置中讀取重排規則
-        reorder_idx = DATASET_CONFIGS_BY_COUNT[total_points]["mirror_reorder"]
+        reorder_idx = DataConfig.CONFIGS_BY_COUNT[total_points]["mirror_reorder"]
         # 防呆檢查：確保長度一致
         if len(reorder_idx) == num_crop_points:
             return kpts[reorder_idx, :]
@@ -1076,14 +1056,14 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
             box_l = _load_box_from_det_json(det_path, "LeftHip")
             box_r = _load_box_from_det_json(det_path, "RightHip")
         else:
-            box_l = _detect_one(yolo_model, img, YOLO_LEFT_CLS, YOLO_CONF, YOLO_IOU)
-            box_r = _detect_one(yolo_model, img, YOLO_RIGHT_CLS, YOLO_CONF, YOLO_IOU)
+            box_l = _detect_one(yolo_model, img, YOLOConfig.LEFT_CLS, YOLOConfig.CONF, YOLOConfig.IOU)
+            box_r = _detect_one(yolo_model, img, YOLOConfig.RIGHT_CLS, YOLOConfig.CONF, YOLOConfig.IOU)
         
         if not box_l or not box_r:
             print(f"[Skip] {fname} detection failed."); continue
 
         # Infer Left
-        xl, yl, xr, yr = _square_expand_clip(*box_l, W, H, BBOX_EXPAND, True)
+        xl, yl, xr, yr = _square_expand_clip(*box_l, W, H, YOLOConfig.BBOX_EXPAND, True)
         crop_l = img.crop((int(xl), int(yl), int(xr), int(yr))).convert("L")
         crop_l.save(os.path.join(result_dir, "crops", "left", f"{os.path.splitext(fname)[0]}_left.jpg"))
         
@@ -1091,7 +1071,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         else: pred_l_raw = _infer_via_mirror(kp_right, crop_l, transform, (xl,yl,xr,yr), "right", "left", input_size, head_type, Nx, Ny)
 
         # Infer Right
-        xl, yl, xr, yr = _square_expand_clip(*box_r, W, H, BBOX_EXPAND, True)
+        xl, yl, xr, yr = _square_expand_clip(*box_r, W, H, YOLOConfig.BBOX_EXPAND, True)
         crop_r = img.crop((int(xl), int(yl), int(xr), int(yr))).convert("L")
         crop_r.save(os.path.join(result_dir, "crops", "right", f"{os.path.splitext(fname)[0]}_right.jpg"))
         
@@ -1158,8 +1138,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         pix_l, pix_r = np.mean(point_dists[:mid]), np.mean(point_dists[mid:])
         err_ail, err_air = abs(ail_p - ail_g), abs(air_p - air_g)
         
-        is_pix = (pix_l > PIX_TH or pix_r > PIX_TH)
-        is_ang = (err_ail > ANG_TH or err_air > ANG_TH)
+        is_pix = (pix_l > Eval.PIX_TH or pix_r > Eval.PIX_TH)
+        is_ang = (err_ail > Eval.ANG_TH or err_air > Eval.ANG_TH)
         
         if is_pix:
             reason = f"{fname} L_pix:{pix_l:.2f} R_pix:{pix_r:.2f}"
