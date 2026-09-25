@@ -13,6 +13,7 @@ from predict_hip_crop_keypoints import (
     plot_error_histogram_with_shapiro,
     plot_avg_distances, 
     plot_ai_angle_errors,
+    analyze_and_save_point_correlation
 )
 
 # from predict_full_image_keypoints import predict_onestage
@@ -172,6 +173,30 @@ def main():
         std_val = float(vals.std(ddof=1)) if len(vals) > 1 else 0.0
         summary_lines.append(f"  {key:<18} = {mean_val:.6f} ± {std_val:.6f}")
 
+    if "all_point_distances" in example and "fold_point_mu" in example:
+        summary_lines.append("\n" + "=" * 80)
+        summary_lines.append("Point-wise Error Analysis (針對每一個關鍵點)")
+        summary_lines.append("=" * 80)
+        
+        # 1. 拼接所有 Fold 的所有樣本誤差 -> 這是為了算 OOF 樣本標準差
+        # 形狀會從 5 個 (N張圖, 8點) 變成 (總圖數, 8點)
+        oof_all_points = np.vstack([m["all_point_distances"] for m in all_fold_metrics])
+        oof_mu = np.mean(oof_all_points, axis=0)
+        oof_std = np.std(oof_all_points, axis=0, ddof=1)
+        
+        # 2. 拼接所有 Fold 的平均誤差 -> 這是為了算 Fold 間標準差
+        # 形狀會是 (5, 8點)
+        fold_mus = np.vstack([m["fold_point_mu"] for m in all_fold_metrics])
+        fold_level_std = np.std(fold_mus, axis=0, ddof=1)
+        
+        # 把每個點的結果寫進 txt 中
+        num_points = oof_mu.shape[0] # 自動判斷是 8 點還是 12 點
+        for i in range(num_points):
+            summary_lines.append(f"Point {i+1}:")
+            summary_lines.append(f"  OOF Sample Error : {oof_mu[i]:.4f} ± {oof_std[i]:.4f} px (病患個體差異)")
+            summary_lines.append(f"  Fold-level Std   : ± {fold_level_std[i]:.4f} px (訓練穩定度)")
+            summary_lines.append("")
+            
     # 寫到檔案
     os.makedirs(output_root, exist_ok=True)
     summary_path = os.path.join(output_root, f"{exp_name}_kfold_test_summary.txt")
@@ -323,10 +348,50 @@ def main():
         ai_errors_avg=all_ai_err_avg,
         save_path=pixel_vs_angle_path,
     )
-
+    
+    # ===================================================
+    # ---- 8) Over-all Point-wise Correlation Analysis ----
+    # ===================================================
+    print("\n" + "=" * 80)
+    print("[K-Fold 總結] 執行所有 Fold 總體相關性分析...")
+    print("=" * 80)
+    
+    # 取得拼好的 OOF 點誤差
+    pt_err_arr_all = np.vstack([m["all_point_distances"] for m in all_fold_metrics])
+    
+    # 決定 K-Fold 統整 CSV 儲存路徑
+    overall_csv_path = os.path.join(all_folds_summary_dir, "overall_point_correlation.csv")
+    
+    # 呼叫同一支函式，傳入 K-Fold 總體資料
+    overall_corr_str = analyze_and_save_point_correlation(
+        pt_err_arr=pt_err_arr_all, 
+        ai_err_l=all_ai_err_left, 
+        ai_err_r=all_ai_err_right, 
+        left_preds=all_left_pred, 
+        left_gts=all_left_gt, 
+        right_preds=all_right_pred, 
+        right_gts=all_right_gt,
+        csv_save_path=overall_csv_path
+    )
+    
+    # 附加寫入到你已經建好的 summary_path 
+    with open(summary_path, "a", encoding="utf-8") as f:
+        f.write(overall_corr_str)
+        
+    print(f"[K-Fold 總結] 精華結論已附加寫入: {summary_path}")
 
 if __name__ == "__main__":
     main()
+
+"""
+python kfold_predict_hip_crop_keypoints.py \
+  --model_name convnext_tiny_fpn1234concat \
+  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_direct_regression_cropleft_mirror_384_200_0.0001_32_fold{fold}_best.pth" \
+  --yolo_weights weights/yolo26s_kfold_nckuh_fold{fold}.pt \
+  --data_root data \
+  --k 5 \
+  --output_root results_nckuh_kfold
+"""
 
 """
 python kfold_predict_hip_crop_keypoints.py \
@@ -341,7 +406,7 @@ python kfold_predict_hip_crop_keypoints.py \
 """
 python kfold_predict_hip_crop_keypoints.py \
   --model_name convnext_tiny_fpn1234concat \
-  --kp_left_tpl "weights/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_cropleft_mirror_224_200_0.0001_64_fold{fold}_best.pth" \
+  --kp_left_tpl "results_kfold_mtddh/convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_left-only_224_100_0.0001_64_</convnext_tiny_fpn1234concat_simcc_2d_sr3.0_sigma4.0_cropleft_mirror_224_100_0.0001_64_fold{fold}_best.pth" \
   --yolo_weights weights/yolo26s_kfold_mtddh_fold{fold}.pt \
   --data_root data \
   --k 5 \

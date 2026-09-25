@@ -15,7 +15,7 @@ from sklearn.metrics import (
     r2_score,
     cohen_kappa_score
 )
-from scipy.stats import pearsonr, spearmanr, kendalltau, ttest_rel, mannwhitneyu, wilcoxon, shapiro
+from scipy.stats import pearsonr, spearmanr, kendalltau, ttest_rel, mannwhitneyu, wilcoxon, shapiro, pointbiserialr
 from ultralytics import YOLO
 
 from datasets.hip_crop_keypoints import DATASET_CONFIGS_BY_COUNT # 鏡像重排
@@ -883,6 +883,92 @@ def plot_pixel_vs_angle_error(
         "r2_pixel": r2
     }
 
+def analyze_and_save_point_correlation(
+    pt_err_arr, 
+    ai_err_l, ai_err_r, 
+    left_preds, left_gts, 
+    right_preds, right_gts,
+    csv_save_path
+):
+    """
+    計算關鍵點像素誤差與 ACI / IHDI 指標的相關性，儲存為 CSV 並回傳報告字串。
+    """
+    # 1. 確保轉為 numpy array 並計算正確率
+    pt_err_arr = np.asarray(pt_err_arr)
+    ai_err_l = np.asarray(ai_err_l, dtype=float)
+    ai_err_r = np.asarray(ai_err_r, dtype=float)
+    
+    ihdi_correct_l = (np.asarray(left_preds) == np.asarray(left_gts)).astype(int)
+    ihdi_correct_r = (np.asarray(right_preds) == np.asarray(right_gts)).astype(int)
+
+    # 2. 動態抓取單邊點數
+    total_points = pt_err_arr.shape[1] 
+    half_pts = total_points // 2
+
+    correlation_results = {"Point": [], "Target_Metric": [], "r_value": [], "p_value": []}
+
+    # 3. 核心計算邏輯 (左髖)
+    for i in range(half_pts):
+        pt_idx = i + 1
+        pt_errors = pt_err_arr[:, i]
+        
+        # Pearson (ACI)
+        r_aci, p_aci = pearsonr(pt_errors, ai_err_l) if len(np.unique(pt_errors)) > 1 and len(np.unique(ai_err_l)) > 1 else (0.0, 1.0)
+        correlation_results["Point"].append(f"P{pt_idx} (Left)")
+        correlation_results["Target_Metric"].append("ACI_Error_Left")
+        correlation_results["r_value"].append(r_aci)
+        correlation_results["p_value"].append(p_aci)
+        
+        # Point-Biserial (IHDI)
+        r_ihdi, p_ihdi = pointbiserialr(ihdi_correct_l, pt_errors) if len(np.unique(pt_errors)) > 1 and len(np.unique(ihdi_correct_l)) > 1 else (0.0, 1.0)
+        correlation_results["Point"].append(f"P{pt_idx} (Left)")
+        correlation_results["Target_Metric"].append("IHDI_Correct_Left")
+        correlation_results["r_value"].append(r_ihdi)
+        correlation_results["p_value"].append(p_ihdi)
+
+    # 4. 核心計算邏輯 (右髖)
+    for i in range(half_pts, total_points):
+        pt_idx = i + 1
+        pt_errors = pt_err_arr[:, i]
+        
+        # Pearson (ACI)
+        r_aci, p_aci = pearsonr(pt_errors, ai_err_r) if len(np.unique(pt_errors)) > 1 and len(np.unique(ai_err_r)) > 1 else (0.0, 1.0)
+        correlation_results["Point"].append(f"P{pt_idx} (Right)")
+        correlation_results["Target_Metric"].append("ACI_Error_Right")
+        correlation_results["r_value"].append(r_aci)
+        correlation_results["p_value"].append(p_aci)
+        
+        # Point-Biserial (IHDI)
+        r_ihdi, p_ihdi = pointbiserialr(ihdi_correct_r, pt_errors) if len(np.unique(pt_errors)) > 1 and len(np.unique(ihdi_correct_r)) > 1 else (0.0, 1.0)
+        correlation_results["Point"].append(f"P{pt_idx} (Right)")
+        correlation_results["Target_Metric"].append("IHDI_Correct_Right")
+        correlation_results["r_value"].append(r_ihdi)
+        correlation_results["p_value"].append(p_ihdi)
+
+    # 5. 輸出完整 CSV
+    df_corr = pd.DataFrame(correlation_results)
+    os.makedirs(os.path.dirname(csv_save_path), exist_ok=True)
+    df_corr.to_csv(csv_save_path, index=False)
+    print(f"[*] 相關性分析 CSV 已儲存至: {csv_save_path}")
+
+    # 6. 整理具有統計顯著性的 TXT 字串並回傳
+    df_significant = df_corr[df_corr["p_value"] < 0.05].copy()
+    df_significant["abs_r"] = df_significant["r_value"].abs()
+    df_significant = df_significant.sort_values(by=["Target_Metric", "abs_r"], ascending=[True, False])
+
+    summary_str = "\n" + "=" * 80 + "\n"
+    summary_str += "[Point-wise Correlation Analysis]\n"
+    summary_str += "=" * 80 + "\n"
+    summary_str += f"CSV Path: {os.path.basename(csv_save_path)}\n"
+    summary_str += "【具有統計顯著性 (p < 0.05) 的關鍵點影響力排行】\n"
+
+    if not df_significant.empty:
+        summary_str += df_significant.drop(columns=["abs_r"]).to_string(index=False) + "\n"
+    else:
+        summary_str += "目前沒有任何點的誤差達到統計顯著性標準。\n"
+        
+    return summary_str
+
 def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, output_dir, fold_index=None, using_gt_box=False, model_points=None):
     
     # 0. 自動判斷資料集格式
@@ -959,6 +1045,7 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
 
     # Storage Lists (for return dictionary)
     all_avg_distances = []
+    all_point_distances_list = []
     image_labels = []
     
     ai_errors_left, ai_errors_right = [], [] # 絕對誤差列表
@@ -966,8 +1053,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     ai_left_gt_list, ai_left_pred_list = [], []
     ai_right_gt_list, ai_right_pred_list = [], []
     
-    left_preds_all, left_gts_all = [], []
-    right_preds_all, right_gts_all = [], []
+    left_preds_all, left_gts_all = [], [] # IHDI Quadrant 分類結果 (Pred vs GT)
+    right_preds_all, right_gts_all = [], [] # IHDI Quadrant 分類結果 (Pred vs GT)
     
     pixel_outlier_records = []
     angle_outlier_records = []
@@ -1017,9 +1104,14 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         
         # 1. Avg Distance (Based on Raw Points)
         dist = calculate_avg_distance(kps_pred_raw, kps_gt_raw)
+        # 異常值排除
         # if dist >= 50:
         #     print(f"[Skip] {fname} distance too large: {dist:.2f}"); continue
         all_avg_distances.append(dist)
+        
+        point_dists = np.linalg.norm(kps_pred_raw - kps_gt_raw, axis=1)
+        all_point_distances_list.append(point_dists)
+        
         image_labels.append(idx)
 
         # 2. Geometry (Unify to 12 points first)
@@ -1091,6 +1183,10 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         tick_step=tick_step_val
     )
     
+    # 1.1 繪製每個關鍵點的距離誤差
+    all_point_distances_array = np.array(all_point_distances_list)
+    fold_point_mu = np.mean(all_point_distances_array, axis=0)
+    
     # 2. 繪製 AI 角度誤差圖
     avg_error_left, avg_error_right, mu_ai_err, std_ai_err = plot_ai_angle_errors(
         image_labels=image_labels,
@@ -1142,6 +1238,22 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
     with open(os.path.join(result_dir, "outliers_all.txt"), "w") as f: f.write("\n".join(all_outlier_records))
     with open(os.path.join(result_dir, "outlier_files.txt"), "w") as f: f.write("\n".join(all_outlier_files))
     
+    # -------------------------------------------------------------
+    # 各獨立關鍵點誤差 vs. 臨床指標 相關性分析
+    # -------------------------------------------------------------
+    fold_csv_path = os.path.join(result_dir, "fold_point_correlation.csv")
+    corr_summary_str = analyze_and_save_point_correlation(
+        pt_err_arr=all_point_distances_list, 
+        ai_err_l=ai_errors_left, 
+        ai_err_r=ai_errors_right, 
+        left_preds=left_preds_all, 
+        left_gts=left_gts_all, 
+        right_preds=right_preds_all, 
+        right_gts=right_gts_all,
+        csv_save_path=fold_csv_path
+    )
+    print(corr_summary_str)
+    
     # ------------------------------------------------------------- Final Metrics Calculation -------------------------------------------------------------
     print(f"Done. Avg Dist: {mu_dist:.2f} ± {std_dist:.2f}, AI Err: {mu_ai_err:.2f} ± {std_ai_err:.2f}, IHDI_4cls_Acc_All: {cls_metrics['4cls_Acc_all']:.2%}")
 
@@ -1149,6 +1261,8 @@ def predict(model_name, kp_left_path, kp_right_path, yolo_weights, data_dir, out
         "exp_name": exp_name,
         "num_images": len(image_labels),
 
+        "all_point_distances": all_point_distances_array, # 保存這個 Fold 所有樣本的每點誤差
+        "fold_point_mu": fold_point_mu,                   # 保存這個 Fold 的每點平均誤差
         "all_avg_distances": all_avg_distances,
         "ai_errors_left": ai_errors_left,
         "ai_errors_right": ai_errors_right,
