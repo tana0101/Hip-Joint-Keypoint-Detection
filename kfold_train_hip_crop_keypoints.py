@@ -7,9 +7,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
-from train_hip_crop_keypoints import train, LOGS_DIR
-# from train_full_image_keypoints import train, LOGS_DIR
+from train_hip_crop_keypoints import train
+# from train_full_image_keypoints import train
 from utils.train_vis import plot_training_progress
+from config import Paths
 
 def list_images(img_dir: Path, exts: List[str]) -> List[Path]:
     files = []
@@ -285,7 +286,7 @@ def main():
     mean_train_pixel = train_pixel_mat.mean(axis=0)
     mean_val_pixel = val_pixel_mat.mean(axis=0)
 
-    os.makedirs(LOGS_DIR, exist_ok=True)
+    os.makedirs(Paths.LOGS_DIR, exist_ok=True)
 
     # k-fold 的實驗結果命名
     base_exp_name = all_fold_metrics[0]["exp_name"]
@@ -304,7 +305,7 @@ def main():
         nme_ylim=(0.0001, 0.02),
         pixel_error_ylim=(0.01, 50),
     )
-    summary_plot_path = os.path.join(LOGS_DIR, f"{base_exp_name}_kfold_summary.png")
+    summary_plot_path = os.path.join(Paths.LOGS_DIR, f"{base_exp_name}_kfold_summary.png")
     plt.savefig(summary_plot_path)
     plt.close()
     print(f"[KFold] Summary plot (mean curves) saved to: {summary_plot_path}")
@@ -319,7 +320,7 @@ def main():
     plt.title(f"Per-fold Validation Loss Curves ({args.mode})")
     plt.legend()
     plt.grid(True)
-    per_fold_val_loss_path = os.path.join(LOGS_DIR, f"{base_exp_name}_kfold_per_fold_val_loss.png")
+    per_fold_val_loss_path = os.path.join(Paths.LOGS_DIR, f"{base_exp_name}_kfold_per_fold_val_loss.png")
     plt.savefig(per_fold_val_loss_path)
     plt.close()
     print(f"[KFold] Per-fold val loss plot saved to: {per_fold_val_loss_path}")
@@ -333,7 +334,7 @@ def main():
     plt.title(f"Per-fold Validation NME Curves ({args.mode})")
     plt.legend()
     plt.grid(True)
-    per_fold_val_nme_path = os.path.join(LOGS_DIR, f"{base_exp_name}_kfold_per_fold_val_nme.png")
+    per_fold_val_nme_path = os.path.join(Paths.LOGS_DIR, f"{base_exp_name}_kfold_per_fold_val_nme.png")
     plt.savefig(per_fold_val_nme_path)
     plt.close()
     print(f"[KFold] Per-fold val NME plot saved to: {per_fold_val_nme_path}")
@@ -347,7 +348,7 @@ def main():
     plt.title(f"Per-fold Validation Pixel Error Curves ({args.mode})")
     plt.legend()
     plt.grid(True)
-    per_fold_val_pixel_path = os.path.join(LOGS_DIR, f"{base_exp_name}_kfold_per_fold_val_pixel.png")
+    per_fold_val_pixel_path = os.path.join(Path.LOGS_DIR, f"{base_exp_name}_kfold_per_fold_val_pixel.png")
     plt.savefig(per_fold_val_pixel_path)
     plt.close()
     print(f"[KFold] Per-fold val pixel error plot saved to: {per_fold_val_pixel_path}")
@@ -370,7 +371,7 @@ def main():
     avg_best_val_nme = float(np.mean(best_val_nmes))
     avg_best_val_pixel = float(np.mean(best_val_pixels))
 
-    summary_txt = os.path.join(LOGS_DIR, f"{base_exp_name}_kfold_summary.txt")
+    summary_txt = os.path.join(Paths.LOGS_DIR, f"{base_exp_name}_kfold_summary.txt")
     with open(summary_txt, "w") as f:
         f.write(f"K-fold training summary (mode = {args.mode})\n")
         f.write(f"model = {args.model_name}, side = {args.side}, head_type = {args.head_type}\n")

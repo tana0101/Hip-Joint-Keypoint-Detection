@@ -17,20 +17,7 @@ from .augment import ProbAugmentedKeypointDataset, FullImageAugmentedDataset
 from utils.csv_parser import parse_csv_get_points
 from datasets.transforms import get_full_image_base_transform
 
-DATASET_CONFIGS_BY_COUNT = {
-    12: {
-        "name": "IHDI_12pt",
-        # IHDI 的左右定義鏡像後需要交叉重排: [0,1,2] -> [2,1,0]
-        "mirror_reorder": [2, 1, 0, 5, 4, 3] 
-    },
-    8: {
-        "name": "MTDDH_8pt",
-        # MTDDH 假設是對稱定義 (1外/2內)，鏡像後通常順序不變，或根據實際情況調整
-        "mirror_reorder": [0, 1, 2, 3] 
-    }
-}
-
-SIDE_LABELS = {"left": "LeftHip", "right": "RightHip"}
+from config import Dataset as DataConfig
 
 def read_detection_for_image(detections_dir: str, img_name: str):
     """
@@ -152,7 +139,7 @@ class HipCropKeypointDataset(Dataset):
         self.crop_expand = crop_expand
         self.keep_square = keep_square
         self.input_size = input_size
-        self.side_label = SIDE_LABELS[self.side]
+        self.side_label = DataConfig.SIDE_LABELS[self.side]
         self.bbox_jitter = bbox_jitter
         self.jitter_center = jitter_center
         self.jitter_scale = jitter_scale
@@ -173,10 +160,10 @@ class HipCropKeypointDataset(Dataset):
             self.total_points = sample_pts.shape[0]
             
             # 檢查是否有對應的 Config
-            if self.total_points not in DATASET_CONFIGS_BY_COUNT:
-                raise ValueError(f"Detected {self.total_points} points, but no config found in DATASET_CONFIGS_BY_COUNT.")
+            if self.total_points not in DataConfig.CONFIGS_BY_COUNT:
+                raise ValueError(f"Detected {self.total_points} points, but no config found in DataConfig.CONFIGS_BY_COUNT.")
             
-            self.config = DATASET_CONFIGS_BY_COUNT[self.total_points]
+            self.config = DataConfig.CONFIGS_BY_COUNT[self.total_points]
             print(f"[{side.upper()}] Detected Dataset: {self.config['name']} ({self.total_points} points total)")
         else:
             raise ValueError("Annotation directory is empty, cannot detect dataset format.")

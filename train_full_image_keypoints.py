@@ -29,11 +29,7 @@ from utils.heatmap import compute_loss_heatmap
 from utils.ema import ModelEMA
 from models.model import initialize_model
 
-LOGS_DIR = "logs"
-MODELS_DIR = "weights"
-EMA_DECAY = 0.995
-EMA_RAMPUP_STEPS = 500
-EMA_START_DECAY = 0.90
+from config import Paths, EMA, FullImageAugment
 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
@@ -71,11 +67,11 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, h
     # 2. 單階段嚴謹的資料增強 (包含水平翻轉、比例平移、縮放)
     augmented_train_dataset = FullImageAugmentedDataset(
         train_dataset, 
-        p=0.7, 
-        max_angle=10, 
-        trans_ratio=0.05,  # 5% 的偏移
-        scale_range=0.15,  # 0.85 ~ 1.15 倍縮放
-        clamp=True
+        p=FullImageAugment.PROB, 
+        max_angle=FullImageAugment.MAX_ANGLE, 
+        trans_ratio=FullImageAugment.TRANS_RATIO,  # 5% 的偏移
+        scale_range=FullImageAugment.SCALE_RANGE,  # 0.85 ~ 1.15 倍縮放
+        clamp=FullImageAugment.CLAMP
     )
 
     g = torch.Generator()
@@ -148,10 +144,10 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, h
     # Initialize EMA
     ema = ModelEMA(
         model,
-        target_decay=EMA_DECAY,
+        target_decay=EMA.DECAY,
         device=device,
-        rampup_steps=EMA_RAMPUP_STEPS,
-        start_decay=EMA_START_DECAY,
+        rampup_steps=EMA.RAMPUP_STEPS,
+        start_decay=EMA.START_DECAY,
     )
     
     # Save the model's training progress
@@ -175,7 +171,7 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, h
         exp_name += f"_fold{fold_index}"
     
     run_name = exp_name
-    tb_dir = os.path.join(LOGS_DIR, "tb", run_name)
+    tb_dir = os.path.join(Paths.LOGS_DIR, "tb", run_name)
     writer = SummaryWriter(log_dir=tb_dir)
     try:
         dummy = torch.randn(1, 3, input_size, input_size, device=device)
@@ -304,12 +300,12 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, h
         writer.add_scalar("opt/lr", optimizer.param_groups[0]['lr'], epoch)
         
     # Save the training and validation progress
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs(Paths.LOGS_DIR, exist_ok=True)
+    os.makedirs(Paths.MODELS_DIR, exist_ok=True)
     
     # Save the best model (with the lowest validation loss)
     if best_model_state:
-        model_path = os.path.join(MODELS_DIR, f"{exp_name}_best.pth")
+        model_path = os.path.join(Paths.MODELS_DIR, f"{exp_name}_best.pth")
         torch.save(best_model_state, model_path)
         print(f"Best model saved to: {model_path}")
 
@@ -355,13 +351,13 @@ def train(data_dir, model_name, input_size, epochs, learning_rate, batch_size, h
     )
 
     # Save the training plot
-    training_plot_path = os.path.join(LOGS_DIR, f"{exp_name}_training_plot.png")
+    training_plot_path = os.path.join(Paths.LOGS_DIR, f"{exp_name}_training_plot.png")
     plt.savefig(training_plot_path)
     print(f"Training plot saved to: {training_plot_path}")
     plt.show()
 
     # Save the Loss, NME, and Pixel Error to a text file
-    training_log_path = os.path.join(LOGS_DIR, f"{exp_name}_training_log.txt")
+    training_log_path = os.path.join(Paths.LOGS_DIR, f"{exp_name}_training_log.txt")
     with open(training_log_path, "w") as f:
         for epoch, (loss, nme, pixel_error, val_loss, val_nme, val_pixel_error) in enumerate(
                 zip(epoch_losses, epoch_nmes, epoch_pixel_errors, val_losses, val_nmes, val_pixel_errors), 1):
