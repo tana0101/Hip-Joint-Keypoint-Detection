@@ -6,7 +6,7 @@ import re
 
 # ================= 設定區域 =================
 # 定義基礎路徑
-BASE_DIR = 'xray_IHDI_2'
+BASE_DIR = 'mtddh_xray_2d'
 
 # 輸入資料夾 (指向 mtddh_xray_2d 內部)
 DIR_IMAGES = os.path.join(BASE_DIR, 'images')
