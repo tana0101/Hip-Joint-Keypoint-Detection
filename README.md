@@ -85,15 +85,15 @@ This study uses retrospectively collected hip X-ray images from National Cheng K
 
 **Acetabular Index (AI) Distribution**
 
-<img src="dataset/xray_IHDI_2_clean/xray_IHDI_AI_Distribution.png" />
+<img src="dataset/xray_IHDI_AI_Distribution.png" />
 
-<img src="dataset/mtddh_xray_2d/mtddh_xray_2d_AI_Distribution.png" />
+<img src="dataset/mtddh_xray_2d_AI_Distribution.png" />
 
 **IHDI Classification Distribution**
 
 <div style="display: flex; justify-content: space-between; gap: 10px;">
-  <img src="dataset/xray_IHDI_2_clean/xray_IHDI_IHDI_Distribution.png" style="width: 49%;" />
-  <img src="dataset/mtddh_xray_2d/mtddh_xray_2d_IHDI_Distribution.png" style="width: 49%;" />
+  <img src="dataset/xray_IHDI_IHDI_Distribution.png" style="width: 49%;" />
+  <img src="dataset/mtddh_xray_2d_IHDI_Distribution.png" style="width: 49%;" />
 </div>
 
 ## 🏆 Model Performance & Results

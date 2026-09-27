@@ -73,13 +73,13 @@
 ### 📊資料統計分佈
 
 **Acetabular Index (AI) 分佈**
-<img src="dataset/xray_IHDI_2_clean/xray_IHDI_AI_Distribution.png" />
-<img src="dataset/mtddh_xray_2d/mtddh_xray_2d_AI_Distribution.png" />
+<img src="dataset/xray_IHDI_AI_Distribution.png" />
+<img src="dataset/mtddh_xray_2d_AI_Distribution.png" />
 
 **IHDI 分類分佈**
 <div style="display: flex; justify-content: space-between; gap: 10px;">
-  <img src="dataset/xray_IHDI_2_clean/xray_IHDI_IHDI_Distribution.png" style="width: 49%;" />
-  <img src="dataset/mtddh_xray_2d/mtddh_xray_2d_IHDI_Distribution.png" style="width: 49%;" />
+  <img src="dataset/xray_IHDI_IHDI_Distribution.png" style="width: 49%;" />
+  <img src="dataset/mtddh_xray_2d_IHDI_Distribution.png" style="width: 49%;" />
 </div>
 
 ## 🏆 Model Performance & Results
