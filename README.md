@@ -227,6 +227,22 @@ The standard experimental and inference pipeline is as follows:
 
 > 💡 **For detailed environment setup, the K-Fold cross-validation workflow, and complete command-line configurations, please refer to the [📖 Advanced Usage Guide](docs/USAGE_GUIDE.md).**
 
+## 🔧 Analysis & Visualization Tools
+
+In addition to the main training and evaluation pipeline, this project provides several utilities for dataset analysis and model result visualization:
+
+- `visualize_single_simcc.py`  
+  Visualizes keypoint predictions and SimCC probability distributions for a single image. This tool is useful for inspecting model predictions and analyzing abnormal or failure cases.  
+  Results are saved to `simcc_vis_results/`.
+
+- `analyze_hip_dataset.py`  
+  Analyzes dataset statistics and distributions, including sample counts, AI, and IHDI distributions, and generates corresponding statistical plots.  
+  The generated results can be found in the corresponding dataset directory under `dataset/`.
+
+- `compare_dataset_annotations.py`  
+  Compares keypoints, AI measurements, and related measurement differences between different annotation versions of the same dataset. This tool can be used to evaluate annotation consistency.  
+  Results are saved to `annotation_comparison_results/`.
+
 ## ⚖️ License
 
 This project is released under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.

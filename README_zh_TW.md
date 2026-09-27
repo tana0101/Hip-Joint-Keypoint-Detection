@@ -209,6 +209,22 @@ Hip-Joint-Keypoint-Detection/
 
 > 💡 **詳細的環境建置、K-Fold 交叉驗證流程、以及完整的指令參數設定，請參閱 [📖 進階使用指南 (Usage Guide)](docs/USAGE_GUIDE.md)。**
 
+## 🔧 Analysis & Visualization Tools
+
+除了主要的訓練與評估流程外，本專案亦提供以下工具協助資料與模型結果分析：
+
+- `visualize_single_simcc.py`  
+  可視化單張影像的關鍵點預測結果與 SimCC 機率分布，適合用於模型預測結果檢視與異常案例分析。  
+  結果輸出至 `simcc_vis_results/`。
+
+- `analyze_hip_dataset.py`  
+  統計資料集的樣本數、AI 與 IHDI 等資料分布，並產生對應統計圖表。  
+  產生的結果可於 `dataset/` 對應資料集目錄中查看。
+
+- `compare_dataset_annotations.py`  
+  比較同一資料集不同標註版本之關鍵點、AI 與相關量測結果差異，可用於分析標註一致性。  
+  結果輸出至 `annotation_comparison_results/`。
+
 ## ⚖️License
 
 本專案採用 **GNU Affero General Public License v3.0 (AGPL-3.0)** 授權發布。

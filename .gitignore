@@ -22,5 +22,5 @@ check_full_image_augmented/
 check_right_to_left_hip_crops_augmented/
 check_right_to_left_hip_crops_hist_eq/
 output/
-舊資料/
 simcc_vis_results/
+annotation_comparison_results/
